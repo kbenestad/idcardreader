@@ -795,7 +795,7 @@ function downloadBlob(content, filename, type) {
 async function loadTemplates() {
   manifest = []; templateList = []; templateErrors = [];
   try {
-    const res = await fetch('templates/manifest.json');
+    const res = await fetch('templates/manifest.json?_=' + Date.now());
     if (!res.ok) { templateErrors.push('manifest.json: HTTP ' + res.status); }
     else { manifest = await res.json(); }
   } catch (e) { templateErrors.push('manifest.json: ' + e.message); }
@@ -803,7 +803,7 @@ async function loadTemplates() {
 
   for (const file of manifest) {
     try {
-      const r = await fetch('templates/' + file);
+      const r = await fetch('templates/' + file + '?_=' + Date.now());
       if (!r.ok) { templateErrors.push(file + ': HTTP ' + r.status + ' — file missing or the name in manifest.json doesn’t match the actual filename (check spelling, case, .yaml vs .yml)'); continue; }
       const text = await r.text();
       let data;
@@ -823,7 +823,7 @@ async function loadTemplates() {
 
 /* ── Boot ────────────────────────────────────────────────────────────────── */
 try {
-  CFG = await loadYamlConfig();
+  CFG = await loadYamlConfig('config.yml?_=' + Date.now());   // bust caches so edits take effect
   assertConfig(CFG);
   normaliseConfig();
   applyAccent(CFG);
