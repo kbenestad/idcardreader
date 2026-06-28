@@ -68,6 +68,11 @@
 .idc-crop__h--ne { right: -7px; top: -7px; cursor: nesw-resize; }
 .idc-crop__h--sw { left: -7px; bottom: -7px; cursor: nesw-resize; }
 .idc-crop__h--se { right: -7px; bottom: -7px; cursor: nwse-resize; }
+.idc-crop__h--n { left: 50%; top: -7px; transform: translateX(-50%); cursor: ns-resize; }
+.idc-crop__h--s { left: 50%; bottom: -7px; transform: translateX(-50%); cursor: ns-resize; }
+.idc-crop__h--w { left: -7px; top: 50%; transform: translateY(-50%); cursor: ew-resize; }
+.idc-crop__h--e { right: -7px; top: 50%; transform: translateY(-50%); cursor: ew-resize; }
+.idc-stage { overflow: visible; }
 
 /* PDF page picker */
 .idc-thumbs { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 8px; }
@@ -186,7 +191,7 @@ let tpl = null;             // the template object being built
 const sideCanvas = { front: null, back: null };   // finalized working images
 
 function emptyTemplate(name, slug) {
-  return { name, slug, 'expiry-field': null, front: { fields: [] }, back: undefined };
+  return { name, slug, aspect: 'id-card', 'expiry-field': null, front: { fields: [] }, back: undefined };
 }
 
 /* ── Render ──────────────────────────────────────────────────────────────── */
@@ -198,6 +203,7 @@ function render() {
   wrap.appendChild(el('p', { className: 'idc-muted', style: { marginBottom: '14px' } }, S('builder-intro')));
   wrap.appendChild(buildPickerCard());
   if (tpl) {
+    wrap.appendChild(buildAspectCard());
     wrap.appendChild(buildSideCard('front'));
     wrap.appendChild(buildBackToggleCard());
     if (tpl.back) wrap.appendChild(buildSideCard('back'));
@@ -249,6 +255,24 @@ function buildPickerCard() {
 
   card.append(sel, newBox, collision);
   refreshCollision();
+  return card;
+}
+
+/* Document shape (aspect ratio). Locks the crop in both builder and extractor so
+ * region percentages line up. Changing it discards captured images (the crop
+ * ratio changed) so they get re-cropped to the new shape. */
+function buildAspectCard() {
+  const card = el('div', { className: 'kb-card' });
+  card.appendChild(el('div', { className: 'kb-card__title' }, S('aspect-title')));
+  card.appendChild(el('p', { className: 'idc-muted', style: { marginBottom: '10px' } }, S('aspect-hint')));
+  const sel = el('select', { className: 'kb-select' });
+  [['id-card', 'aspect-id-card'], ['passport', 'aspect-passport']].forEach(([v, k]) => {
+    const o = el('option', { value: v }, S(k)); if ((tpl.aspect || 'id-card') === v) o.selected = true; sel.appendChild(o);
+  });
+  sel.addEventListener('change', () => {
+    tpl.aspect = sel.value; sideCanvas.front = sideCanvas.back = null; render();
+  });
+  card.appendChild(sel);
   return card;
 }
 
@@ -316,7 +340,7 @@ function mountCapture(host, side, onDone) {
     work.innerHTML = '';
     const cropHost = el('div');
     work.appendChild(cropHost);
-    const ctl = attachCropRotate(canvas, cropHost);
+    const ctl = attachCropRotate(canvas, cropHost, { aspect: aspectRatioFor(tpl.aspect), allowOverflow: true });
     const bar = el('div', { className: 'kb-actbar', style: { marginTop: '12px' } });
     bar.append(
       el('button', { className: 'kb-btn kb-btn--primary', onClick: () => {
@@ -398,6 +422,7 @@ function mountRegionEditor(host, side) {
     if (!sideObj.fields.length) { listHost.appendChild(el('p', { className: 'idc-muted' }, S('no-regions'))); return; }
     sideObj.fields.forEach((f, i) => listHost.appendChild(regionRow(f, i)));
     renderQrParse();
+    syncExpiry();   // date fields may have been added/removed/retyped
   }
   function regionRow(f, i) {
     const row = el('div', { className: 'idc-regrow', id: 'regrow-' + side + '-' + i });
@@ -405,10 +430,10 @@ function mountRegionEditor(host, side) {
     labelI.addEventListener('input', () => {
       f.label = labelI.value;
       if (!idI.dataset.touched) { f.id = slugify(labelI.value); idI.value = f.id; }
-      drawRegions();
+      drawRegions(); syncExpiry();
     });
     const idI = el('input', { className: 'kb-input', value: f.id || '' });
-    idI.addEventListener('input', () => { idI.dataset.touched = '1'; f.id = slugify(idI.value); });
+    idI.addEventListener('input', () => { idI.dataset.touched = '1'; f.id = slugify(idI.value); syncExpiry(); });
 
     const typeSel = el('select', { className: 'kb-select' });
     [['text', 'type-text'], ['date', 'type-date'], ['photo', 'type-photo'], ['qr', 'type-qr']]
@@ -507,23 +532,36 @@ function buildBackToggleCard() {
   return card;
 }
 
-/* Expiry field selector */
+/* Expiry field selector. Its options depend on the date fields drawn on each
+ * side, which change live in the region editor — so the option list is built by
+ * a standalone helper that syncExpiry() can re-run in place without a full
+ * re-render (which would interrupt editing). */
+function populateExpiryOptions(sel) {
+  const ef = tpl['expiry-field'];
+  let efStillValid = false;
+  sel.innerHTML = '';
+  sel.appendChild(el('option', { value: '' }, S('expiry-none')));
+  ['front', 'back'].forEach(side => {
+    if (!tpl[side]) return;
+    tpl[side].fields.filter(f => f.type === 'date' && f.id).forEach(f => {
+      const val = side + ':' + f.id;
+      const o = el('option', { value: val }, (side === 'front' ? S('front-word') : S('back-word')) + ' · ' + (f.label || f.id));
+      if (ef && ef.side === side && ef.id === f.id) { o.selected = true; efStillValid = true; }
+      sel.appendChild(o);
+    });
+  });
+  if (ef && !efStillValid) tpl['expiry-field'] = null;   // the chosen field was removed/retyped
+}
+function syncExpiry() {
+  const sel = document.getElementById('idc-expiry-sel');
+  if (sel) populateExpiryOptions(sel);
+}
 function buildExpiryCard() {
   const card = el('div', { className: 'kb-card' });
   card.appendChild(el('div', { className: 'kb-card__title' }, S('expiry-title')));
   card.appendChild(el('p', { className: 'idc-muted', style: { marginBottom: '10px' } }, S('expiry-hint')));
-  const sel = el('select', { className: 'kb-select' });
-  sel.appendChild(el('option', { value: '' }, S('expiry-none')));
-  ['front', 'back'].forEach(side => {
-    if (!tpl[side]) return;
-    tpl[side].fields.filter(f => f.type === 'date').forEach(f => {
-      const val = side + ':' + f.id;
-      const o = el('option', { value: val }, (side === 'front' ? S('front-word') : S('back-word')) + ' · ' + (f.label || f.id));
-      const ef = tpl['expiry-field'];
-      if (ef && ef.side === side && ef.id === f.id) o.selected = true;
-      sel.appendChild(o);
-    });
-  });
+  const sel = el('select', { className: 'kb-select', id: 'idc-expiry-sel' });
+  populateExpiryOptions(sel);
   sel.addEventListener('change', () => {
     if (!sel.value) tpl['expiry-field'] = null;
     else { const [side, id] = sel.value.split(':'); tpl['expiry-field'] = { side, id }; }
@@ -570,7 +608,7 @@ function buildExportCard() {
 
 function buildTemplateObject() {
   // Emit a clean object in a stable key order.
-  const clean = { name: tpl.name || tpl.slug, slug: tpl.slug };
+  const clean = { name: tpl.name || tpl.slug, slug: tpl.slug, aspect: tpl.aspect || 'id-card' };
   if (tpl['expiry-field']) clean['expiry-field'] = tpl['expiry-field'];
   const side = (s) => {
     const o = {};

@@ -72,6 +72,11 @@
 .idc-crop__h--ne { right: -7px; top: -7px; cursor: nesw-resize; }
 .idc-crop__h--sw { left: -7px; bottom: -7px; cursor: nesw-resize; }
 .idc-crop__h--se { right: -7px; bottom: -7px; cursor: nwse-resize; }
+.idc-crop__h--n { left: 50%; top: -7px; transform: translateX(-50%); cursor: ns-resize; }
+.idc-crop__h--s { left: 50%; bottom: -7px; transform: translateX(-50%); cursor: ns-resize; }
+.idc-crop__h--w { left: -7px; top: 50%; transform: translateY(-50%); cursor: ew-resize; }
+.idc-crop__h--e { right: -7px; top: 50%; transform: translateY(-50%); cursor: ew-resize; }
+.idc-stage { overflow: visible; }
 
 .idc-thumbs { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 8px; }
 .idc-thumb { border: 2px solid var(--border-strong); border-radius: var(--radius-sm);
@@ -90,6 +95,10 @@
 .idc-regimg { width: 120px; max-height: 80px; object-fit: contain; border: 1px solid var(--border);
   border-radius: 4px; background: var(--surface-3); }
 .idc-photoimg { max-width: 120px; max-height: 150px; border-radius: 4px; border: 1px solid var(--border); }
+.idc-lightbox { position: fixed; inset: 0; background: rgba(10,12,16,.82); z-index: 10000;
+  display: flex; align-items: center; justify-content: center; padding: 24px; cursor: zoom-out; }
+.idc-lightbox img { max-width: 96vw; max-height: 92vh; border-radius: 6px; box-shadow: 0 10px 40px rgba(0,0,0,.5); }
+.idc-lightbox .cap { position: absolute; bottom: 16px; left: 0; right: 0; text-align: center; color: #fff; font-size: 13px; }
 .idc-flabel { font-size: var(--fs-label); font-weight: 600; text-transform: uppercase;
   letter-spacing: .03em; color: var(--text-muted); }
 .idc-review { display: inline-flex; align-items: center; gap: 6px; font-size: var(--fs-small);
@@ -293,7 +302,7 @@ function mountCapture(host, side, onDone) {
   function showCropper(canvas) {
     work.innerHTML = '';
     const cropHost = el('div'); work.appendChild(cropHost);
-    const ctl = attachCropRotate(canvas, cropHost);
+    const ctl = attachCropRotate(canvas, cropHost, { aspect: aspectRatioFor(tpl.aspect), allowOverflow: true });
     work.appendChild(el('div', { className: 'kb-actbar', style: { marginTop: '12px' } },
       el('button', { className: 'kb-btn kb-btn--primary', onClick: () => { sideCanvas[side] = ctl.getResult(); ctl.destroy(); onDone(); } }, S('use-this-image'))));
   }
@@ -402,10 +411,13 @@ function buildReviewCard() {
 function reviewRow(r, i) {
   const row = el('div', { className: 'idc-fieldrow' + (r.conflict && !r.resolved ? ' is-conflict' : '') });
 
-  // col 1: region / photo preview
+  // col 1: region / photo preview (click to zoom)
   const imgCol = el('div');
-  if (r.type === 'photo' && r.photoDataUrl) imgCol.appendChild(el('img', { className: 'idc-photoimg', src: r.photoDataUrl }));
-  else imgCol.appendChild(el('img', { className: 'idc-regimg', src: r.regionDataUrl }));
+  const src = (r.type === 'photo' && r.photoDataUrl) ? r.photoDataUrl : r.regionDataUrl;
+  const thumb = el('img', { className: (r.type === 'photo' && r.photoDataUrl) ? 'idc-photoimg' : 'idc-regimg',
+    src, title: S('zoom-hint'), onClick: () => openLightbox(src, r.label) });
+  thumb.style.cursor = 'zoom-in';
+  imgCol.appendChild(thumb);
   row.appendChild(imgCol);
 
   // col 2: label + value / candidates
@@ -560,7 +572,15 @@ function generateHtml() {
     if (r.type === 'date') { const iso = normaliseDate(r.value, r.calendar); if (iso) display = iso; }
     return { label: r.label, value: display, type: r.type };
   });
-  const photo = results.find(r => r.type === 'photo' && r.photoDataUrl);
+  // Photos: the first photo field is the primary; any further photo fields plus
+  // the front/back card scans go in the "Images" section at the bottom.
+  const photoFields = results.filter(r => r.type === 'photo' && r.photoDataUrl);
+  const primary = photoFields[0] || null;
+  const extras = [];
+  photoFields.slice(1).forEach(p => extras.push({ src: p.photoDataUrl, label: p.label }));
+  if (sideCanvas.front) extras.push({ src: sideCanvas.front.toDataURL('image/jpeg', 0.72), label: S('step-front') });
+  if (sideCanvas.back) extras.push({ src: sideCanvas.back.toDataURL('image/jpeg', 0.72), label: S('step-back') });
+
   const data = {
     docType: tpl.name || tpl.slug,
     generated: genDate,
@@ -577,11 +597,12 @@ function generateHtml() {
     unknown: S('expiry-unknown'), noField: S('no-expiry-field'),
     copy: S('copy'), copied: S('copied'), rawQr: S('raw-qr-label'),
     empty: S('field-empty'), recheck: S('live-recheck-note'),
+    images: S('images-section'), zoomHint: S('zoom-hint'),
   };
   const html = buildStandaloneHtml(data, strings, {
-    frontImg: sideCanvas.front ? sideCanvas.front.toDataURL('image/jpeg', 0.72) : null,
-    backImg: sideCanvas.back ? sideCanvas.back.toDataURL('image/jpeg', 0.72) : null,
-    photoImg: photo ? photo.photoDataUrl : null,
+    primaryImg: primary ? primary.photoDataUrl : null,
+    primaryLabel: primary ? primary.label : '',
+    extras,
   });
   downloadBlob(html, outputFilename('html'), 'text/html');
 }
@@ -601,8 +622,16 @@ function buildStandaloneHtml(data, strings, imgs) {
           ${f.value ? `<button class="copy" data-copy="v${i}" aria-label="${esc(strings.copy)} ${esc(f.label)}">${esc(strings.copy)}</button>` : ''}
         </div>
       </div>`).join('');
-  const photoBlock = imgs.photoImg ? `<img class="photo" src="${imgs.photoImg}" alt="photo">` : '';
-  const sideImgs = [imgs.frontImg, imgs.backImg].filter(Boolean).map(s => `<img class="side" src="${s}" alt="card">`).join('');
+  const primaryBlock = imgs.primaryImg
+    ? `<div class="topphoto"><img class="zoom" src="${imgs.primaryImg}" alt="${esc(imgs.primaryLabel)}" title="${esc(strings.zoomHint)}"></div>` : '';
+  const extras = imgs.extras || [];
+  const imagesSection = extras.length ? `
+    <div class="images">
+      <h2>${esc(strings.images)}</h2>
+      <div class="thumbs">
+        ${extras.map(im => `<figure class="thumb"><img class="zoom" src="${im.src}" alt="${esc(im.label)}" title="${esc(strings.zoomHint)}"><figcaption class="cap">${esc(im.label)}</figcaption></figure>`).join('')}
+      </div>
+    </div>` : '';
   const rawQrBlock = (data.rawQr.front || data.rawQr.back) ? `
     <details class="qr"><summary>${esc(strings.rawQr)}</summary>
       ${['front', 'back'].filter(s => data.rawQr[s]).map(s => `<div class="qrrow"><b>${s}</b>: <code>${esc(data.rawQr[s])}</code></div>`).join('')}
@@ -624,10 +653,20 @@ function buildStandaloneHtml(data, strings, imgs) {
   h1 { font-size:20px; margin:0 0 2px; }
   .sub { color:#5f6975; font-size:13px; margin-bottom:16px; }
   .banner { display:inline-block; font-weight:700; color:#fff; padding:8px 16px; border-radius:6px;
-    font-size:14px; letter-spacing:.02em; margin-bottom:18px; }
-  .imgs { display:flex; gap:12px; flex-wrap:wrap; align-items:flex-start; margin-bottom:18px; }
-  .side { max-width:300px; max-height:190px; border-radius:6px; border:1px solid #e3e7ee; }
-  .photo { max-width:110px; max-height:150px; border-radius:6px; border:1px solid #e3e7ee; }
+    font-size:14px; letter-spacing:.02em; }
+  .top { display:flex; gap:20px; justify-content:space-between; align-items:flex-start; margin-bottom:18px; }
+  .topmain { min-width:0; }
+  .topphoto img { max-width:150px; max-height:200px; border-radius:8px; border:1px solid #e3e7ee; }
+  .images { margin-top:24px; padding-top:16px; border-top:1px solid #eef1f5; }
+  .images h2 { font-size:13px; text-transform:uppercase; letter-spacing:.04em; color:#5f6975; margin:0 0 10px; }
+  .thumbs { display:flex; gap:14px; flex-wrap:wrap; }
+  .thumb { margin:0; text-align:center; }
+  .thumb img { max-width:240px; max-height:170px; border-radius:6px; border:1px solid #e3e7ee; display:block; }
+  .thumb .cap { font-size:11px; color:#5f6975; margin-top:4px; }
+  .zoom { cursor:zoom-in; }
+  .lb { position:fixed; inset:0; background:rgba(10,12,16,.85); display:none; align-items:center;
+    justify-content:center; padding:24px; cursor:zoom-out; z-index:50; }
+  .lb img { max-width:96vw; max-height:92vh; border-radius:6px; box-shadow:0 10px 40px rgba(0,0,0,.5); }
   .row { display:grid; grid-template-columns:200px 1fr; gap:14px; padding:9px 0; border-top:1px solid #eef1f5; }
   .row:first-of-type { border-top:0; }
   .lab { font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:.04em; color:#5f6975; padding-top:3px; }
@@ -648,14 +687,20 @@ function buildStandaloneHtml(data, strings, imgs) {
 </head>
 <body>
 <div class="doc">
-  <h1>${esc(strings.title)}</h1>
-  <div class="sub">${esc(data.docType)} · ${esc(strings.generatedOn)} ${esc(data.generated)}</div>
-  <div class="banner" id="banner">…</div>
-  <div class="imgs">${sideImgs}${photoBlock}</div>
+  <div class="top">
+    <div class="topmain">
+      <h1>${esc(strings.title)}</h1>
+      <div class="sub">${esc(data.docType)} · ${esc(strings.generatedOn)} ${esc(data.generated)}</div>
+      <div class="banner" id="banner">…</div>
+    </div>
+    ${primaryBlock}
+  </div>
   <div class="fields">${fieldRows}</div>
+  ${imagesSection}
   ${rawQrBlock}
   <div class="foot">${esc(strings.recheck)}</div>
 </div>
+<div class="lb" id="lb"><img alt=""></div>
 <script id="record-data" type="application/json">${JSON.stringify({ expiryIso: data.expiryIso, expiryHasField: data.expiryHasField, expiryRecognised: data.expiryRecognised }).replace(/</g, '\\u003c')}<\/script>
 <script>
 (function(){
@@ -687,6 +732,13 @@ function buildStandaloneHtml(data, strings, imgs) {
       function getId(){ return window.getSelection(); }
     });
   });
+  // (c) Click any photo to expand it full-screen.
+  var lb = document.getElementById('lb'), lbImg = lb.querySelector('img');
+  document.querySelectorAll('img.zoom').forEach(function(img){
+    img.addEventListener('click', function(){ lbImg.src = img.src; lb.style.display = 'flex'; });
+  });
+  lb.addEventListener('click', function(){ lb.style.display = 'none'; lbImg.src = ''; });
+  document.addEventListener('keydown', function(e){ if (e.key === 'Escape') { lb.style.display = 'none'; lbImg.src = ''; } });
 })();
 <\/script>
 </body>
@@ -695,6 +747,16 @@ function buildStandaloneHtml(data, strings, imgs) {
 
 /* ── helpers ─────────────────────────────────────────────────────────────── */
 function noteErr(msg) { const n = el('div', { className: 'kb-note kb-note--error' }); n.innerHTML = '<span>⚠</span><div>' + msg + '</div>'; return n; }
+function openLightbox(src, caption) {
+  const ov = el('div', { className: 'idc-lightbox' });
+  ov.appendChild(el('img', { src }));
+  if (caption) ov.appendChild(el('div', { className: 'cap' }, caption));
+  const close = () => { ov.remove(); document.removeEventListener('keydown', onKey); };
+  const onKey = e => { if (e.key === 'Escape') close(); };
+  ov.addEventListener('click', close);
+  document.addEventListener('keydown', onKey);
+  document.body.appendChild(ov);
+}
 function dataUrlToBytes(dataUrl) {
   const b64 = dataUrl.split(',')[1]; const bin = atob(b64);
   const bytes = new Uint8Array(bin.length);

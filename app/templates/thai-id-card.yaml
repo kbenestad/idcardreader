@@ -15,6 +15,7 @@
 
 name: "Thai National ID Card"
 slug: thai-id-card
+aspect: id-card                          # id-card (ISO ID-1) | passport (ID-3) — locks the crop ratio
 expiry-field: { side: front, id: expiry }
 
 front:

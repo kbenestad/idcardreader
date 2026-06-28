@@ -113,16 +113,33 @@ async function captureToImage(file) {
   return { canvas: first, isPdf: true, pageCount, pickPage, thumbnails };
 }
 
+/* Document shapes → crop aspect ratio (width / height, landscape). ID-1 card is
+ * 85.6×53.98 mm; an ID-3 passport data page is 125×88 mm. A template names one
+ * of these so both the builder and extractor crop to the same proportions and
+ * region percentages line up. */
+const IDC_ASPECTS = { 'id-card': 85.6 / 53.98, 'passport': 125 / 88 };
+function aspectRatioFor(key) { return IDC_ASPECTS[key] || null; }
+
 /* ── 3.2  Crop / rotate UI ─────────────────────────────────────────────────── */
 /* Hand-rolled (no Cropper.js dependency — simple enough not to justify one).
  * Renders the working image into `host` with rotate buttons (90° steps) and a
  * draggable/resizable crop rectangle. The "Use this image" button is built by
  * the CALLER, which calls getResult() to obtain the cropped+rotated canvas.
- * Identical for front and back, in both apps. */
-function attachCropRotate(sourceCanvas, host) {
+ *
+ * opts:
+ *   aspect        number (w/h) → the crop is LOCKED to this ratio: only corner
+ *                 handles, all preserving the ratio. null → free crop with
+ *                 corner handles that preserve the *current* ratio and edge
+ *                 handles that resize a single dimension.
+ *   allowOverflow true → the crop may extend beyond the image (for photos that
+ *                 cut off part of the card); missing area is filled white in
+ *                 getResult(). */
+function attachCropRotate(sourceCanvas, host, opts = {}) {
   host.innerHTML = '';
   host.classList.add('idc-cropper');
 
+  const aspect = opts.aspect && opts.aspect > 0 ? opts.aspect : null;   // w/h, or null
+  const allowOverflow = !!opts.allowOverflow;
   let rotation = 0;                 // degrees, multiples of 90
   // crop rectangle in *display* pixels, relative to the shown image
   let crop = null;
@@ -133,7 +150,9 @@ function attachCropRotate(sourceCanvas, host) {
   imgCanvas.className = 'idc-stage__img';
   const box = document.createElement('div');
   box.className = 'idc-crop';
-  ['nw', 'ne', 'sw', 'se'].forEach(pos => {
+  // Corners always; edges only in free (unlocked-ratio) mode.
+  const handles = aspect ? ['nw', 'ne', 'sw', 'se'] : ['nw', 'n', 'ne', 'e', 'se', 's', 'sw', 'w'];
+  handles.forEach(pos => {
     const h = document.createElement('div');
     h.className = 'idc-crop__h idc-crop__h--' + pos;
     h.dataset.handle = pos;
@@ -172,6 +191,16 @@ function attachCropRotate(sourceCanvas, host) {
   }
 
   let displayScale = 1;   // display px / source px
+  function initCrop() {
+    const W = imgCanvas.width, H = imgCanvas.height;
+    if (aspect) {                       // largest rect of `aspect`, centred
+      let w = W, h = w / aspect;
+      if (h > H) { h = H; w = h * aspect; }
+      crop = { x: (W - w) / 2, y: (H - h) / 2, w, h };
+    } else {
+      crop = { x: 0, y: 0, w: W, h: H };
+    }
+  }
   function paint() {
     const src = rotatedSource();
     const maxW = Math.max(240, host.clientWidth || 640);
@@ -179,16 +208,25 @@ function attachCropRotate(sourceCanvas, host) {
     imgCanvas.width = Math.round(src.width * displayScale);
     imgCanvas.height = Math.round(src.height * displayScale);
     imgCanvas.getContext('2d').drawImage(src, 0, 0, imgCanvas.width, imgCanvas.height);
-    if (!crop) crop = { x: 0, y: 0, w: imgCanvas.width, h: imgCanvas.height };
+    if (!crop) initCrop();
     clampCrop();
     drawBox();
   }
   function clampCrop() {
     const W = imgCanvas.width, H = imgCanvas.height;
-    crop.w = Math.max(20, Math.min(crop.w, W));
-    crop.h = Math.max(20, Math.min(crop.h, H));
-    crop.x = Math.max(0, Math.min(crop.x, W - crop.w));
-    crop.y = Math.max(0, Math.min(crop.y, H - crop.h));
+    if (allowOverflow) {
+      // Allow the crop past the image edges (cards cut off in a photo), but keep
+      // it from running away entirely.
+      crop.w = Math.max(20, Math.min(crop.w, 3 * W));
+      crop.h = Math.max(20, Math.min(crop.h, 3 * H));
+      crop.x = Math.max(-W, Math.min(crop.x, 2 * W));
+      crop.y = Math.max(-H, Math.min(crop.y, 2 * H));
+    } else {
+      crop.w = Math.max(20, Math.min(crop.w, W));
+      crop.h = Math.max(20, Math.min(crop.h, H));
+      crop.x = Math.max(0, Math.min(crop.x, W - crop.w));
+      crop.y = Math.max(0, Math.min(crop.y, H - crop.h));
+    }
   }
   function drawBox() {
     box.style.left = crop.x + 'px';
@@ -197,22 +235,27 @@ function attachCropRotate(sourceCanvas, host) {
     box.style.height = crop.h + 'px';
   }
 
-  // Pointer drag: move the box, or resize from a corner handle.
+  // Pointer drag: move the box, resize from an edge (single dimension), or
+  // resize from a corner (keeps the aspect ratio — the fixed one if locked,
+  // else the crop's ratio at grab time).
   let drag = null;
   function onDown(e) {
     const handle = e.target.dataset && e.target.dataset.handle;
     const rect = stage.getBoundingClientRect();
-    drag = {
-      mode: handle ? 'resize' : (e.target === box ? 'move' : null),
-      handle, startX: e.clientX, startY: e.clientY,
-      orig: { ...crop }, rect,
-    };
-    if (!drag.mode) {
-      // Clicking empty stage starts a brand-new rectangle.
+    let mode = handle ? 'resize' : (e.target === box ? 'move' : null);
+    // In free mode a click on empty stage starts a brand-new rectangle; in
+    // aspect-locked mode the box stays the locked shape, so ignore empty clicks.
+    if (!mode && !aspect) {
       const x = e.clientX - rect.left, y = e.clientY - rect.top;
       crop = { x, y, w: 1, h: 1 };
-      drag = { mode: 'resize', handle: 'se', startX: e.clientX, startY: e.clientY, orig: { ...crop }, rect };
-    }
+      drag = { mode: 'resize', handle: 'se', ratio: null, startX: e.clientX, startY: e.clientY, orig: { ...crop }, rect };
+    } else if (mode) {
+      const isCorner = handle && handle.length === 2;
+      drag = {
+        mode, handle, rect, startX: e.clientX, startY: e.clientY, orig: { ...crop },
+        ratio: isCorner ? (aspect || crop.w / crop.h) : null,
+      };
+    } else { drag = null; return; }
     box.setPointerCapture && box.setPointerCapture(e.pointerId);
     e.preventDefault();
     window.addEventListener('pointermove', onMove);
@@ -224,13 +267,23 @@ function attachCropRotate(sourceCanvas, host) {
     const o = drag.orig;
     if (drag.mode === 'move') {
       crop.x = o.x + dx; crop.y = o.y + dy;
+    } else if (drag.ratio) {
+      // Corner: keep the ratio. Width is driven by horizontal drag (signed per
+      // corner), height derived; the opposite corner stays anchored.
+      const hd = drag.handle, sx = hd.includes('e') ? 1 : -1;
+      let w = Math.max(20, o.w + sx * dx);
+      let h = w / drag.ratio;
+      const x = hd.includes('e') ? o.x : o.x + o.w - w;
+      const y = hd.includes('s') ? o.y : o.y + o.h - h;
+      crop = { x, y, w, h };
     } else {
+      // Edge: resize one dimension only.
       let x = o.x, y = o.y, w = o.w, h = o.h;
       const hd = drag.handle;
-      if (hd.includes('w')) { x = o.x + dx; w = o.w - dx; }
-      if (hd.includes('e')) { w = o.w + dx; }
-      if (hd.includes('n')) { y = o.y + dy; h = o.h - dy; }
-      if (hd.includes('s')) { h = o.h + dy; }
+      if (hd === 'w') { x = o.x + dx; w = o.w - dx; }
+      if (hd === 'e') { w = o.w + dx; }
+      if (hd === 'n') { y = o.y + dy; h = o.h - dy; }
+      if (hd === 's') { h = o.h + dy; }
       if (w < 0) { x += w; w = -w; }
       if (h < 0) { y += h; h = -h; }
       crop = { x, y, w, h };
@@ -270,13 +323,18 @@ function attachCropRotate(sourceCanvas, host) {
         w: crop.w / imgCanvas.width * 100, h: crop.h / imgCanvas.height * 100,
       };
     },
-    // Final, full-resolution cropped + rotated canvas.
+    // Final, full-resolution cropped + rotated canvas. When the crop extends
+    // past the image, the missing area is filled white (drawImage clips the
+    // source/destination proportionally, so the visible part stays aligned).
     getResult() {
       const src = rotatedSource();
       const sx = crop.x / displayScale, sy = crop.y / displayScale;
       const sw = crop.w / displayScale, sh = crop.h / displayScale;
       const out = newCanvas(sw, sh);
-      out.getContext('2d').drawImage(src, sx, sy, sw, sh, 0, 0, out.width, out.height);
+      const ctx = out.getContext('2d');
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(0, 0, out.width, out.height);
+      ctx.drawImage(src, sx, sy, sw, sh, 0, 0, out.width, out.height);
       return out;
     },
     destroy() { window.removeEventListener('resize', onResize); },

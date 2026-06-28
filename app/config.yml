@@ -110,10 +110,16 @@ localisation:
       copied: "Copied"
       copy-aria: "Copy {field}"
       live-recheck-note: "Expiry status is re-checked against today's date each time this file is opened."
+      images-section: "Images"
+      zoom-hint: "Click an image to enlarge."
 
       # ── Template builder (template.html) ──
       app-title-builder: "Template Builder"
       builder-intro: "Calibrate where each field sits on a document, then export a template the extractor can use."
+      aspect-title: "Document shape"
+      aspect-hint: "Locks the crop to the document's proportions so field regions line up between calibration and extraction. Pick the closest match."
+      aspect-id-card: "ID card (ISO ID-1, 85.6 × 54 mm)"
+      aspect-passport: "Passport page (ID-3, 125 × 88 mm)"
       tpl-select-label: "Start from"
       tpl-new: "➕ New template"
       tpl-new-name: "Template name"
