@@ -22,7 +22,7 @@ basis app is **pixel-identical** to the bizdocs apps.
 ## Layout
 
 ```
-basis/
+app/                  (this repo's copy of the bizdocs "basis" standalone starter)
   index.html          self-contained app shell (references ./assets, not ../assets)
   config.yml          standard bizdocs config header + localisation
   assets/
@@ -75,5 +75,5 @@ The app `fetch()`es `config.yml`, so serve it over HTTP (not `file://`):
 
 ```bash
 python3 -m http.server 8000
-# open http://localhost:8000/basis/
+# open http://localhost:8000/app/
 ```
