@@ -1,0 +1,10 @@
+{
+  "name": "Template",
+  "short_name": "Template",
+  "icons": [
+    { "src": "favicon.svg", "type": "image/svg+xml", "sizes": "any" }
+  ],
+  "theme_color": "#2f6fed",
+  "background_color": "#eef2f8",
+  "display": "standalone"
+}

@@ -1,0 +1,124 @@
+/* =============================================================================
+ * bizdocs — Foundation & colour scheme   (assets/style.css)
+ * -----------------------------------------------------------------------------
+ * Shared by every app (invoice, reimburse, timesheet, …) via:
+ *     <link rel="stylesheet" href="../assets/style.css">
+ *
+ * This file is the SINGLE SOURCE OF TRUTH for the colour scheme, typography
+ * scale, fonts, reset and page shell. Change a token here and every app
+ * updates identically. Reusable UI components live in `ui.css`.
+ * ========================================================================== */
+
+/* ── Fonts (Bunny CDN — privacy-respecting, offline-graceful) ──────────────── */
+@font-face {
+  font-family: "Schibsted Grotesk"; font-style: normal; font-weight: 400 800;
+  font-display: swap;
+  src: local("Schibsted Grotesk"),
+       url("https://fonts.bunny.net/schibsted-grotesk/files/schibsted-grotesk-latin-400-normal.woff2") format("woff2");
+}
+@font-face {
+  font-family: "JetBrains Mono"; font-style: normal; font-weight: 400 600;
+  font-display: swap;
+  src: local("JetBrains Mono"),
+       url("https://fonts.bunny.net/jetbrains-mono/files/jetbrains-mono-latin-500-normal.woff2") format("woff2");
+}
+
+/* ── Design tokens — light (the colour scheme) ─────────────────────────────── */
+:root {
+  --font-sans: "Schibsted Grotesk", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+
+  /* Typography scale — driven by --font-scale (apps bump this for zoom) */
+  --font-scale: 1;
+  --fs-base:  calc(15px   * var(--font-scale));
+  --fs-input: calc(15px   * var(--font-scale));
+  --fs-label: calc(12px   * var(--font-scale));
+  --fs-title: calc(13px   * var(--font-scale));
+  --fs-small: calc(12.5px * var(--font-scale));
+  --fs-h1:    calc(22px   * var(--font-scale));
+
+  /* Accent */
+  --accent:        #2F6FED;
+  --accent-hover:  #1F57CF;
+  --accent-soft:   #EEF3FE;
+  --accent-border: #C7D9FB;
+  --on-accent:     #FFFFFF;
+
+  /* Surfaces & text */
+  --bg:            #EEF2F8;
+  --surface:       #FFFFFF;
+  --surface-2:     #F4F7FB;
+  --surface-3:     #E5ECF5;
+  --border:        #E3E7EE;
+  --border-strong: #D3D9E2;
+  --text:          #14181E;
+  --text-soft:     #3A434F;
+  --text-muted:    #5F6975;
+  --placeholder:   #9AA3AF;
+
+  /* Status */
+  --danger:  #D64545; --danger-soft:  #FBEAEA; --danger-border:  #F0C9C9;
+  --warning: #C9851F; --warning-soft: #FBF1DD; --warning-border: #EED9AD;
+  --success: #1F9D5F; --success-soft: #E2F3EA; --success-border: #BFE3CF;
+  --info:    #2F6FED; --info-soft:    #EEF3FE; --info-border:    #C7D9FB;
+
+  /* Shape & elevation */
+  --radius:      8px;
+  --radius-sm:   6px;
+  --radius-pill: 999px;
+  --shadow-sm:   0 1px 2px rgba(20,24,30,.05);
+  --shadow:      0 6px 22px rgba(20,24,30,.08);
+  --ring:        0 0 0 3px rgba(47,111,237,.20);
+
+  color-scheme: light;
+}
+
+/* ── Design tokens — dark (auto via OS, or forced with [data-theme="dark"]) ── */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --accent:#5685E9; --accent-hover:#6C98EF; --accent-soft:#16233F; --accent-border:#21386A;
+    --bg:#0D1117; --surface:#161B22; --surface-2:#1C232C; --surface-3:#1C232C;
+    --border:#232A33; --border-strong:#2D3641;
+    --text:#EEF1F5; --text-soft:#C2CAD3; --text-muted:#8B95A1; --placeholder:#6F7986;
+    --danger:#E06464; --danger-soft:#341819; --danger-border:#5A2A2A;
+    --warning:#D99A3A; --warning-soft:#33270F; --warning-border:#574017;
+    --success:#3BB97A; --success-soft:#13301F; --success-border:#1F4D33;
+    --info:#88ABF2; --info-soft:#16233F; --info-border:#21386A;
+    --shadow-sm:0 1px 2px rgba(0,0,0,.4); --shadow:0 8px 28px rgba(0,0,0,.5);
+    --ring:0 0 0 3px rgba(86,133,233,.32);
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --accent:#5685E9; --accent-hover:#6C98EF; --accent-soft:#16233F; --accent-border:#21386A;
+  --bg:#0D1117; --surface:#161B22; --surface-2:#1C232C; --surface-3:#1C232C;
+  --border:#232A33; --border-strong:#2D3641;
+  --text:#EEF1F5; --text-soft:#C2CAD3; --text-muted:#8B95A1; --placeholder:#6F7986;
+  --danger:#E06464; --danger-soft:#341819; --danger-border:#5A2A2A;
+  --warning:#D99A3A; --warning-soft:#33270F; --warning-border:#574017;
+  --success:#3BB97A; --success-soft:#13301F; --success-border:#1F4D33;
+  --info:#88ABF2; --info-soft:#16233F; --info-border:#21386A;
+  --shadow-sm:0 1px 2px rgba(0,0,0,.4); --shadow:0 8px 28px rgba(0,0,0,.5);
+  --ring:0 0 0 3px rgba(86,133,233,.32);
+  color-scheme: dark;
+}
+
+/* ── Reset / base ──────────────────────────────────────────────────────────── */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  font-family: var(--font-sans);
+  font-size: var(--fs-base);
+  line-height: 1.55;
+  color: var(--text);
+  background: var(--bg);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  letter-spacing: -0.006em;
+}
+input, select, textarea, button { font-family: inherit; }
+
+.kb-mono { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+
+/* ── Page shell ────────────────────────────────────────────────────────────── */
+.kb-wrap { max-width: 980px; margin: 0 auto; padding: 24px 20px 56px; }

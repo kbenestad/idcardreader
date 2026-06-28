@@ -1,0 +1,234 @@
+<!DOCTYPE html>
+<!--
+  ════════════════════════════════════════════════════════════════════════════
+  basis — STANDALONE STARTER (shares the bizdocs look, NOT part of the series).
+
+  Unlike _template/ (which links the monorepo's ../assets/), this app is
+  self-contained: it bundles its own copy of the shared design + runtime in
+  ./assets/. Those three files (style.css, ui.css, app.js) are kept
+  BYTE-IDENTICAL to bizdocs' shared assets so a bizdocs UI change can be dropped
+  straight in — see ./README.md and ./sync.sh.
+
+  To build a real app from this folder:
+    1. Set <title>, the doc-title <h1>, and the 'basis-lang' localStorage key.
+    2. Replace buildExampleCard() with your form (use kb-* components) and
+       onDownload() with your real PDF (use pdf-lib).
+    3. Fill in config.yml: keep the header keys; add ui: strings to EVERY
+       language block; route all copy through S().
+    4. Drop a real favicon / PWA icon set into ./assets/.
+  Don't hand-rewrite the chrome (head, toolbar, header, footer) — keeping it as
+  shipped is what keeps the app pixel-identical to bizdocs.
+  ════════════════════════════════════════════════════════════════════════════
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="format-detection" content="telephone=no">
+<title>Basis</title>
+
+<!-- Favicons / PWA. Drop a full icon set into assets/ for a real app. -->
+<link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
+<link rel="manifest" href="assets/site.webmanifest">
+<meta name="theme-color" content="#2f6fed">
+
+<!-- Restore persisted theme BEFORE first paint (avoids a flash). Keep this. -->
+<script>
+  (function(){var t=localStorage.getItem('kb-theme');if(t)document.documentElement.setAttribute('data-theme',t);})();
+</script>
+
+<!-- CDN libraries: js-yaml (all apps) + pdf-lib (PDF output; new apps use pdf-lib). -->
+<script src="https://unpkg.com/pdf-lib@1.17.1/dist/pdf-lib.min.js"></script>
+<script src="https://unpkg.com/js-yaml@4.1.0/dist/js-yaml.min.js"></script>
+
+<!-- Shared design + runtime — LOCAL copies (self-contained / standalone).
+     Kept byte-identical to bizdocs assets/. app.js MUST load before the inline <script>. -->
+<link rel="stylesheet" href="assets/style.css">
+<link rel="stylesheet" href="assets/ui.css">
+<script src="assets/app.js"></script>
+
+<!-- App-specific styles ONLY (the shared look lives in assets/*.css).
+     Put column grids / bespoke layout here; empty is fine to start. -->
+<style>
+/* e.g. .basis-row { display:grid; grid-template-columns: 1fr 1fr auto; gap:8px; } */
+</style>
+</head>
+<body>
+<div id="app"><p class="kb-loading">Loading configuration…</p></div>
+
+<script>
+(async function () {
+'use strict';
+/* This script is wrapped in an IIFE, so its top-level functions are NOT
+ * globals — they cannot collide with app.js. Helpers from app.js ($, el,
+ * makeSizeControl, kbAbout, lookupString, …) are visible in here. */
+
+let CFG;          // parsed config.yml
+let lang = 'en';  // active UI language
+
+// ── i18n ───────────────────────────────────────────────────────────────────
+// One string lookup, delegating to the shared lookupString(). Never hardcode
+// user-facing text — add a key to every language's `ui:` block and use S().
+function S(key, vars) {
+  return lookupString(CFG['ui-strings'], key, lang, CFG['default-code'], vars);
+}
+
+// Flatten localisation[lang].ui → ui-strings[key][lang] using the shared core.
+// Add your own data-specific maps (currencies, codes, …) after this.
+function normaliseConfig() {
+  const loc = CFG && CFG.localisation;
+  if (!loc) return;
+  const { table, languages, defaultCode } = buildLangTable(loc);
+  CFG['default-code'] = defaultCode;
+  CFG.languages = CFG.languages || languages;
+  CFG['ui-strings'] = table;
+}
+
+// Copy the active language's About block onto flat fields the modal reads.
+function applyLang(lc) {
+  lang = lc;
+  const loc = CFG.localisation || {};
+  const a = (loc[lc] && loc[lc].about) || (loc[CFG['default-code']] && loc[CFG['default-code']].about) || {};
+  CFG['about-title']   = a.title   || 'About';
+  CFG['about-content'] = a.content || '';
+  CFG['about-button']  = a.button  || 'Close';
+}
+
+function showAboutModal() {
+  return kbAbout({ title: CFG['about-title'], contentMD: CFG['about-content'], closeLabel: CFG['about-button'] });
+}
+
+// ── Render ─────────────────────────────────────────────────────────────────
+function render() {
+  const app = document.getElementById('app');
+  app.innerHTML = '';
+  const wrap = el('div', { className: 'kb-wrap' });
+
+  wrap.appendChild(buildToolbar());
+  wrap.appendChild(buildHeader());
+  wrap.appendChild(buildExampleCard());   // ← replace this with your form
+
+  // Action row
+  const actions = el('div', { className: 'kb-actions' });
+  actions.append(
+    el('button', { className: 'kb-btn kb-btn--ghost' }, S('save')),
+    el('button', { className: 'kb-btn kb-btn--primary', onClick: onDownload }, S('download'))
+  );
+  wrap.appendChild(actions);
+
+  wrap.appendChild(buildFooter());
+
+  app.appendChild(wrap);
+  updateThemeIcon();   // keep theme icons in sync after a (re)render
+}
+
+// Toolbar: language select · spacer · A−/A+ size · theme · about
+function buildToolbar() {
+  const toolbar = el('div', { className: 'kb-toolbar' });
+
+  const langSel = el('select', { className: 'kb-select', 'aria-label': 'Language' });
+  (CFG.languages || []).forEach(l => {
+    const o = el('option', { value: l.code }, l.name || l.code);
+    if (l.code === lang) o.selected = true;
+    langSel.appendChild(o);
+  });
+  langSel.addEventListener('change', () => {
+    applyLang(langSel.value);
+    localStorage.setItem('basis-lang', langSel.value);   // app-specific key
+    render();
+  });
+
+  const { seg: sizeSeg, label: szLabel } = makeSizeControl();
+  toolbar.append(
+    langSel,
+    el('div', { className: 'spacer' }),
+    sizeSeg, szLabel,
+    makeThemeButton(),
+    makeAboutButton(showAboutModal)
+  );
+  return toolbar;
+}
+
+// Header: brand wordmark (kBenestad mark + org/tagline) + right-aligned title.
+function buildHeader() {
+  const header = el('header', { className: 'kb-header' });
+
+  const brand = el('div', { className: 'kb-brand' });
+  const tile = el('span', { className: 'logo' }); tile.innerHTML = KB_BRAND_SVG;
+  const org = el('span', { className: 'org' });
+  org.appendChild(document.createTextNode(CFG.organization || 'kbenestad/basis'));
+  const small = el('small'); small.textContent = CFG.tagline || S('subtitle');
+  org.appendChild(small);
+  brand.append(tile, org);
+
+  const title = el('div', { className: 'kb-doctitle' });
+  title.appendChild(el('h1', null, 'basis'));   // ← your app name (add an icon SVG if you like)
+
+  header.append(brand, title);
+  return header;
+}
+
+// Example content — DELETE and build your own cards/grids from kb-* components.
+function buildExampleCard() {
+  const card = el('div', { className: 'kb-card' });
+  card.appendChild(el('div', { className: 'kb-card__title' }, S('example-section')));
+  const grid = el('div', { className: 'kb-grid cols-2' });
+  grid.append(
+    field(S('field-name'), el('input', { className: 'kb-input', placeholder: S('ph-name') })),
+    field(S('field-date'), el('input', { className: 'kb-input', type: 'date' }))
+  );
+  card.appendChild(grid);
+  return card;
+}
+
+function field(label, input) {
+  const f = el('div', { className: 'kb-field' });
+  f.append(el('span', { className: 'kb-label' }, label), input);
+  return f;
+}
+
+// Footer: kBenestad mark · © · repo link · About.
+function buildFooter() {
+  const sep = () => el('span', { className: 'sep' }, '·');
+  const footer = el('footer', { className: 'kb-footer' });
+  const mark = el('span', { className: 'kb-mark' }); mark.innerHTML = KB_FOOTER_MARK_SVG + 'kBenestad';
+  footer.append(
+    mark,
+    sep(), el('span', null, '© 2026 Kristian Benestad'),
+    sep(), el('a', { href: 'https://github.com/kbenestad/bizdocs', target: '_blank', rel: 'noopener' }, 'kbenestad/bizdocs'),
+    sep(), el('button', { type: 'button', onClick: showAboutModal }, CFG['about-title'] || 'About')
+  );
+  return footer;
+}
+
+// ── PDF output (pdf-lib) — minimal stub; build your real document here. ──────
+async function onDownload() {
+  const { PDFDocument, StandardFonts } = PDFLib;
+  const doc = await PDFDocument.create();
+  const page = doc.addPage();                 // A4 by default
+  const font = await doc.embedFont(StandardFonts.Helvetica);
+  page.drawText('basis', { x: 50, y: 790, size: 18, font });
+  const bytes = await doc.save();
+  const url = URL.createObjectURL(new Blob([bytes], { type: 'application/pdf' }));
+  const a = el('a', { href: url, download: 'basis.pdf' }); a.click();
+  URL.revokeObjectURL(url);
+}
+
+// ── Boot ───────────────────────────────────────────────────────────────────
+try {
+  CFG = await loadYamlConfig();   // fetch + parse config.yml (shared helper)
+  normaliseConfig();
+  applyAccent(CFG);               // apply config accent-colour to --accent
+  initFontScale();                // restore persisted text size
+  lang = localStorage.getItem('basis-lang') || CFG['default-code'] || 'en';
+  applyLang(lang);
+  render();
+} catch (e) {
+  document.getElementById('app').innerHTML =
+    `<div class="kb-wrap"><div class="kb-note kb-note--error"><span>⚠</span>` +
+    `<div><b>Failed to load config.yml</b><br>${e.message}</div></div></div>`;
+}
+})();
+</script>
+</body>
+</html>
