@@ -1,0 +1,82 @@
+name: UNHCR Thailand ID card
+slug: unhcr-thailand-id-card
+aspect: id-card
+expiry-field:
+  side: front
+  id: expiry-date
+front:
+  fields:
+    - id: cardholder-photo
+      label: Cardholder Photo
+      type: photo
+      region:
+        x: 8.2
+        'y': 6.9
+        w: 28.5
+        h: 54.5
+    - id: card-qr
+      label: Card QR
+      type: photo
+      region:
+        x: 55.6
+        'y': 79.2
+        w: 11.4
+        h: 16.1
+    - id: case-number
+      label: Case number
+      type: text
+      region:
+        x: 38.6
+        'y': 10.9
+        w: 37
+        h: 8.6
+    - id: individual-id-number
+      label: Individual ID number
+      type: text
+      region:
+        x: 8.4
+        'y': 64
+        w: 28.5
+        h: 11.4
+    - id: date-of-birth
+      label: Date of birth
+      type: text
+      region:
+        x: 38.6
+        'y': 41.5
+        w: 35.6
+        h: 6.8
+    - id: sex
+      label: Sex
+      type: text
+      region:
+        x: 75.7
+        'y': 41.8
+        w: 16.2
+        h: 6.9
+    - id: country-of-origin
+      label: Country of origin
+      type: text
+      region:
+        x: 38.7
+        'y': 52.7
+        w: 49.7
+        h: 6.3
+    - id: issue-date
+      label: Issue date
+      type: date
+      region:
+        x: 71.3
+        'y': 57.5
+        w: 22.3
+        h: 6.4
+      calendar: gregorian
+    - id: expiry-date
+      label: Expiry date
+      type: date
+      region:
+        x: 71.1
+        'y': 62.8
+        w: 22.6
+        h: 5.8
+      calendar: gregorian
