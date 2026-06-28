@@ -1,0 +1,87 @@
+# =============================================================================
+# basis — Configuration
+# =============================================================================
+# basis is the STANDALONE starter: it shares the bizdocs design system but is
+# self-contained (it bundles its own assets/) and is NOT part of the app series.
+# Copy this folder to start a standalone app, then rename and replace the marked
+# "app-specific" parts. The keys below are the standard bizdocs config header;
+# keep them and add your own (currencies, accounts, products, codes, …).
+
+# Organization
+organization:                # leave blank to show the kBenestad wordmark
+logo: no                     # yes|no — if yes, loads assets/logo.png or logo.jpg
+logo-maxwidth: 4             # cm — maximum logo width on the PDF
+tagline:                     # subtitle shown below the org name (falls back to ui.subtitle)
+
+# Page setup
+page-size: A4                # A4 or letter
+
+# PDF output language: "default" (first defined language) or "user-selected" (follow the UI)
+output-language: default
+
+# Typography (PDF). Standard fonts: Helvetica, Times, Courier (+ Bold/Italic).
+font-body: Helvetica
+font-heading: Helvetica
+font-monospace: Courier
+font-size: 10
+
+# Branding — overrides the --accent token for this app
+accent-colour: "#2f6fed"
+
+# ── Localisation ──────────────────────────────────────────────────────────────
+# Every user-facing string lives here, under each language's `ui:` block, and is
+# looked up via S('key'). Use {token} placeholders for interpolation.
+localisation:
+  default-language: en
+
+  languages:
+    - code: en
+      name: English
+    - code: de
+      name: Deutsch
+
+  en:
+    about:
+      title: "About"
+      button: "Close"
+      content: |
+        ### basis
+        A standalone starter that shares the **bizdocs** look and runtime, but
+        is self-contained (it bundles its own assets/) and lives outside the app
+        series. Toolbar, theme, text-size control, language switch, About modal
+        and footer are already wired up.
+
+        Replace the example card with your own form and PDF output.
+
+        **Source:** [kbenestad/bizdocs](https://github.com/kbenestad/bizdocs)
+    ui:
+      subtitle: "Standalone starter"
+      example-section: "Example section"
+      field-name: "Name"
+      ph-name: "Full name"
+      field-date: "Date"
+      save: "Save"
+      download: "Download PDF"
+
+  de:
+    about:
+      title: "Über"
+      button: "Schließen"
+      content: |
+        ### basis
+        Ein eigenständiges Grundgerüst, das Aussehen und Laufzeit von
+        **bizdocs** teilt, aber in sich geschlossen ist (eigene assets/) und
+        außerhalb der App-Serie liegt. Symbolleiste, Theme, Textgröße,
+        Sprachwahl, Über-Dialog und Fußzeile sind bereits eingebunden.
+
+        Ersetzen Sie die Beispielkarte durch Ihr eigenes Formular und PDF.
+
+        **Quellcode:** [kbenestad/bizdocs](https://github.com/kbenestad/bizdocs)
+    ui:
+      subtitle: "Eigenständige Vorlage"
+      example-section: "Beispielabschnitt"
+      field-name: "Name"
+      ph-name: "Vollständiger Name"
+      field-date: "Datum"
+      save: "Speichern"
+      download: "PDF herunterladen"
