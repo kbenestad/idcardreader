@@ -69,6 +69,7 @@ localisation:
       doc-type-label: "Document type"
       doc-type-placeholder: "Select a document type…"
       no-templates: "No templates found. Build one with the template builder first."
+      templates-skipped: "Some templates listed in manifest.json could not be loaded:"
       step-front: "Front side"
       step-back: "Back side"
       capture-hint: "Upload a photo, scan, or PDF of the card."

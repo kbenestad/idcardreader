@@ -201,6 +201,7 @@ const slugify = s => String(s || '').toLowerCase().trim()
 /* ── Builder state ───────────────────────────────────────────────────────── */
 let manifest = [];          // current manifest.json array (fetched, editable)
 let templateList = [];      // [{file, name, slug, data}]
+let templateErrors = [];    // reasons templates in the manifest were skipped
 let tpl = null;             // the template object being built
 const sideCanvas = { front: null, back: null };   // finalized working images
 
@@ -660,19 +661,25 @@ function downloadBlob(content, filename, type) {
 
 /* Load existing templates from the manifest for the picker. */
 async function loadTemplates() {
+  manifest = []; templateList = []; templateErrors = [];
   try {
     const res = await fetch('templates/manifest.json');
-    manifest = res.ok ? await res.json() : [];
-  } catch (e) { manifest = []; }
-  templateList = [];
+    if (!res.ok) templateErrors.push('manifest.json: HTTP ' + res.status);
+    else manifest = await res.json();
+  } catch (e) { templateErrors.push('manifest.json: ' + e.message); }
+  if (!Array.isArray(manifest)) { templateErrors.push('manifest.json is not a JSON array of filenames'); manifest = []; }
   for (const file of manifest) {
     try {
       const r = await fetch('templates/' + file);
-      if (!r.ok) continue;
-      const data = jsyaml.load(await r.text());
+      if (!r.ok) { templateErrors.push(file + ': HTTP ' + r.status + ' — file missing or the manifest name doesn’t match the actual filename'); continue; }
+      let data;
+      try { data = jsyaml.load(await r.text()); }
+      catch (pe) { templateErrors.push(file + ': YAML parse error — ' + pe.message); continue; }
+      if (!data || typeof data !== 'object') { templateErrors.push(file + ': not a template (parsed as ' + typeof data + ')'); continue; }
       templateList.push({ file, name: data.name, slug: data.slug || file.replace(/\.ya?ml$/, ''), data });
-    } catch (e) { /* skip unreadable template */ }
+    } catch (e) { templateErrors.push(file + ': ' + e.message); }
   }
+  if (templateErrors.length) console.warn('[idcardreader] template issues:\n  ' + templateErrors.join('\n  '));
 }
 
 /* ── Boot ────────────────────────────────────────────────────────────────── */

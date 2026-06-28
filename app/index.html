@@ -201,7 +201,7 @@ function field(label, input) {
 }
 
 /* ── State ───────────────────────────────────────────────────────────────── */
-let manifest = [], templateList = [];
+let manifest = [], templateList = [], templateErrors = [];
 let tpl = null;                                   // selected template
 const sideCanvas = { front: null, back: null };   // finalized working images
 let results = null;                                // array of field result objects
@@ -230,6 +230,16 @@ function render() {
 function buildDocTypeCard() {
   const card = el('div', { className: 'kb-card' });
   card.appendChild(el('div', { className: 'kb-card__title' }, S('doc-type-label')));
+  if (templateErrors.length) {
+    const note = el('div', { className: 'kb-note kb-note--warning' });
+    const body = el('div');
+    body.appendChild(el('b', null, S('templates-skipped')));
+    const ul = el('ul');
+    templateErrors.forEach(msg => ul.appendChild(el('li', null, msg)));
+    body.appendChild(ul);
+    note.append(el('span', null, '⚠'), body);
+    card.appendChild(note);
+  }
   if (!templateList.length) { card.appendChild(el('p', { className: 'idc-muted' }, S('no-templates'))); return card; }
   const sel = el('select', { className: 'kb-select' });
   sel.appendChild(el('option', { value: '' }, S('doc-type-placeholder')));
@@ -783,15 +793,32 @@ function downloadBlob(content, filename, type) {
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 async function loadTemplates() {
-  try { const res = await fetch('templates/manifest.json'); manifest = res.ok ? await res.json() : []; }
-  catch (e) { manifest = []; }
-  templateList = [];
+  manifest = []; templateList = []; templateErrors = [];
+  try {
+    const res = await fetch('templates/manifest.json');
+    if (!res.ok) { templateErrors.push('manifest.json: HTTP ' + res.status); }
+    else { manifest = await res.json(); }
+  } catch (e) { templateErrors.push('manifest.json: ' + e.message); }
+  if (!Array.isArray(manifest)) { templateErrors.push('manifest.json is not a JSON array of filenames'); manifest = []; }
+
   for (const file of manifest) {
-    try { const r = await fetch('templates/' + file); if (!r.ok) continue;
-      const data = jsyaml.load(await r.text());
+    try {
+      const r = await fetch('templates/' + file);
+      if (!r.ok) { templateErrors.push(file + ': HTTP ' + r.status + ' — file missing or the name in manifest.json doesn’t match the actual filename (check spelling, case, .yaml vs .yml)'); continue; }
+      const text = await r.text();
+      let data;
+      try { data = jsyaml.load(text); }
+      catch (pe) { templateErrors.push(file + ': YAML parse error — ' + pe.message); continue; }
+      if (!data || typeof data !== 'object') {
+        const looksHtml = typeof data === 'string' && /^\s*</.test(data);
+        templateErrors.push(file + ': not a template' + (looksHtml ? ' (looks like an HTML page — served as a 404/fallback?)' : ' (parsed as ' + typeof data + ')'));
+        continue;
+      }
+      if (!data.slug) templateErrors.push(file + ': missing "slug:" — using the filename');
       templateList.push({ file, name: data.name, slug: data.slug || file.replace(/\.ya?ml$/, ''), data });
-    } catch (e) { /* skip */ }
+    } catch (e) { templateErrors.push(file + ': ' + e.message); }
   }
+  if (templateErrors.length) console.warn('[idcardreader] template issues:\n  ' + templateErrors.join('\n  '));
 }
 
 /* ── Boot ────────────────────────────────────────────────────────────────── */
