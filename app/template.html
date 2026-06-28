@@ -127,6 +127,20 @@ function normaliseConfig() {
   CFG.languages = CFG.languages || languages;
   CFG['ui-strings'] = table;
 }
+
+/* Fail loudly if config.yml didn't parse to a real config object. The classic
+ * cause is a static host (or stale cache) returning an HTML page for
+ * config.yml, which YAML parses as a plain string — leaving no localisation
+ * block, so the UI would otherwise render every label as a raw key with an
+ * empty language picker. Surface that instead of degrading silently. */
+function assertConfig(cfg) {
+  if (cfg && typeof cfg === 'object' && cfg.localisation) return;
+  const got = (typeof cfg === 'string' && /^\s*</.test(cfg))
+    ? 'an HTML page (a 404 / fallback response?)' : ('parsed type "' + typeof cfg + '"');
+  throw new Error('config.yml has no localisation block — got ' + got + '. Make sure config.yml '
+    + 'sits next to this page and is served as a static file over HTTP. If you just updated it, '
+    + 'hard-refresh to clear a cached copy (Ctrl/Cmd+Shift+R).');
+}
 function applyLang(lc) {
   lang = lc;
   const loc = CFG.localisation || {};
@@ -664,6 +678,7 @@ async function loadTemplates() {
 /* ── Boot ────────────────────────────────────────────────────────────────── */
 try {
   CFG = await loadYamlConfig();
+  assertConfig(CFG);
   normaliseConfig();
   applyAccent(CFG);
   initFontScale();
