@@ -1,79 +1,86 @@
-# basis
+# idcardreader
 
-A **standalone** starter that shares the **bizdocs** look and runtime, but is
-self-contained and lives **outside** the app series.
+A no-backend, no-build web tool that extracts structured fields (text, dates,
+photo, QR) from photos or scans of ID documents, using per-document
+**templates**. It shares the **bizdocs** look and runtime but is self-contained
+(it bundles its own `assets/`) and ships on its own — e.g. at
+`apps.capthailand.org/idcardreader`.
 
-Use it when you want an app that looks and behaves exactly like an `invoice` /
-`reimburse` / `timesheet` page, but ships on its own — its own repo, its own
-hosting — without depending on the bizdocs monorepo's shared `../assets/`.
+It is **two pages in one folder**, sharing the same chrome and `assets/`:
 
-## How it differs from `_template/`
+| Page            | Who uses it     | What it does                                                        |
+| --------------- | --------------- | ------------------------------------------------------------------ |
+| `index.html`    | daily use       | the **extractor** — capture a card, review fields, download records |
+| `template.html` | setup, once     | the **builder** — calibrate where each field sits, export a template |
 
-|                     | `_template/` (in-series)        | `basis/` (standalone)              |
-| ------------------- | ------------------------------- | ---------------------------------- |
-| Shared design/runtime | links `../assets/`            | bundles its **own** `assets/`      |
-| Lives               | inside the bizdocs monorepo     | anywhere — copy the folder out     |
-| UI source of truth  | the monorepo `assets/`          | its `assets/`, kept in sync (below)|
-
-Everything else — the `<head>`, toolbar, header, footer, boot sequence,
-`config.yml` header keys, `kb-*` components — is identical to `_template/`, so a
-basis app is **pixel-identical** to the bizdocs apps.
+Everything runs in the browser; nothing is uploaded to a server.
 
 ## Layout
 
 ```
-app/                  (this repo's copy of the bizdocs "basis" standalone starter)
-  index.html          self-contained app shell (references ./assets, not ../assets)
-  config.yml          standard bizdocs config header + localisation
-  assets/
-    style.css         ← copy of bizdocs assets/style.css   (keep byte-identical)
-    ui.css            ← copy of bizdocs assets/ui.css       (keep byte-identical)
-    app.js            ← copy of bizdocs assets/app.js       (keep byte-identical)
-    favicon.svg       placeholder — replace with a real icon set per app
-    site.webmanifest
-  sync.sh             pull bizdocs UI changes into ./assets
-  README.md
+index.html        the extractor (daily-use tool)
+template.html     the template builder (setup-time tool)
+config.yml        bizdocs config header + localisation (shared by both pages)
+assets/
+  style.css       ← byte-identical bizdocs shared file (kept in sync via sync.sh)
+  ui.css          ← byte-identical bizdocs shared file
+  app.js          ← byte-identical bizdocs shared file
+  capture.js      ← APP-OWNED: capture / PDF render / crop-rotate / OCR / QR / dates
+  favicon.svg, site.webmanifest
+templates/
+  manifest.json   hand-maintained list of available template files
+  thai-id-card.yaml   one file per document type (a calibration example)
+sync.sh, README.md
 ```
 
-## Keeping it pixel-perfect (drop-in updates)
+`sync.sh` refreshes the three shared files from bizdocs; it never touches
+`capture.js`, `config.yml`, the HTML pages or `templates/`.
 
-`assets/style.css`, `assets/ui.css` and `assets/app.js` are **verbatim copies**
-of bizdocs' shared files. Because they're byte-identical, a bizdocs UI change
-drops straight in — just refresh the three files:
+## How the extractor works (`index.html`)
 
-```bash
-# from a local bizdocs checkout sitting next to this folder
-./sync.sh ../path/to/bizdocs/assets
+1. **Pick a document type** (loaded from `templates/manifest.json`).
+2. **Capture** the front (and back, if the template has one): upload a photo,
+   scan, or PDF. Multi-page PDFs show a page picker — you choose which page is
+   which side. Then rotate/crop to a clean working image.
+3. **Extract** — each template region is cropped and read: OCR (text/date),
+   QR decode + payload parse (qr), or kept as a photo crop.
+4. **Review** every field. Each row shows the cropped region, the value (which
+   you can edit), and a per-field **Reviewed ✓/✗** marker (defaults to ✓).
+   Where an OCR value and a QR-derived value **disagree**, both are shown with
+   neither pre-selected — you must pick one (or type a third) to resolve it.
+5. **Generate** (enabled after you confirm the review, and only with no
+   unresolved conflicts):
+   - **PDF** — a frozen "VALID / EXPIRED as of <generation date>" banner, the
+     card images, a field table, and the raw QR payload for audit.
+   - **HTML** — a standalone record that **re-checks the expiry against today's
+     date every time it is opened**, and wraps **every value in a one-click
+     Copy button** for fast copy-out into a case file.
 
-# or straight from GitHub, no checkout needed
-BIZDOCS_REF=main ./sync.sh --from-github
+## Templates (`template.html` → `templates/*.yaml`)
 
-git diff -- assets   # review what changed, then commit
-```
+A template stores, as **percentages of the image** (so it's resolution-
+independent), where each field sits, its type (`text`/`date`/`photo`/`qr`),
+date calendar (`gregorian`/`buddhist`), optional `qr-parse` (how to split a QR
+string) and `qr-key` links, and which field drives the expiry banner.
 
-`sync.sh` only ever touches those three shared files — your `config.yml`,
-`index.html`, favicons and app-specific code are never overwritten.
+Because static hosting can't list a folder, the extractor reads
+`templates/manifest.json`. To add a template: build it, download `{slug}.yaml`
+**and** the updated `manifest.json` the builder offers, then drop both into
+`templates/`.
 
-> Keep the chrome as shipped and route every new app-specific string through
-> `config.yml` + `S()`. The moment you hand-edit the shared `assets/` files,
-> drop-in sync stops being clean — put app-specific CSS in `index.html`'s inline
-> `<style>` instead.
-
-## Build a standalone app from it
-
-1. Copy this `basis/` folder out to its own location/repo.
-2. Set the `<title>`, the doc-title `<h1>`, and the `basis-lang` localStorage key.
-3. Replace `buildExampleCard()` with your form (built from `kb-*` components) and
-   `onDownload()` with your real PDF (use **pdf-lib**).
-4. Fill in `config.yml` — keep the header keys, add `ui:` strings to **every**
-   language block, route all copy through `S()`.
-5. Drop a real favicon / PWA icon set into `assets/`.
+> Calibrate regions, QR delimiters/keys and Buddhist-calendar dates against a
+> **real** sample card — the shipped `thai-id-card.yaml` coordinates and QR
+> structure are placeholders, not verified values.
 
 ## Running locally
 
-The app `fetch()`es `config.yml`, so serve it over HTTP (not `file://`):
+Both pages `fetch()` `config.yml` and `templates/`, so serve over HTTP:
 
 ```bash
 python3 -m http.server 8000
-# open http://localhost:8000/app/
+# open http://localhost:8000/app/  (extractor) or .../app/template.html
 ```
+
+The extraction libraries (PDF.js, Tesseract.js, jsQR) load from CDN, so the
+page needs internet at runtime; OCR language data downloads on first use and is
+then cached by the browser.

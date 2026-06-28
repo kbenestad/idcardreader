@@ -1,0 +1,76 @@
+# =============================================================================
+# Thai National ID Card — extraction template
+# =============================================================================
+# One file per document type. `region` coordinates are PERCENTAGES of the
+# working image's width/height (resolution-independent), as drawn in the
+# template builder (template.html). They are CALIBRATION PLACEHOLDERS here —
+# re-draw them against a real card before trusting them.
+#
+# NOTE (per spec §0, open items): the `qr-parse` block below is an EXAMPLE
+# structure only. The real delimiter and key order for a given card are
+# unknown until calibrated against a genuine sample — do not trust these
+# values blindly. Likewise, Thai cards print Buddhist-calendar dates
+# (year = Gregorian + 543); the date fields set `calendar: buddhist`, but
+# verify the conversion against a real printed date.
+
+name: "Thai National ID Card"
+slug: thai-id-card
+expiry-field: { side: front, id: expiry }
+
+front:
+  qr-parse:
+    delimiter: "|"
+    keys: [id-number, name-th, name-en, dob, issue-date, expiry]
+  fields:
+    - id: photo
+      label: "Photo"
+      type: photo
+      region: { x: 4.2, y: 12.0, w: 22.0, h: 60.0 }
+
+    - id: id-number
+      label: "ID Number"
+      type: text
+      region: { x: 30.0, y: 8.0, w: 45.0, h: 6.0 }
+      qr-key: id-number
+
+    - id: name-th
+      label: "Name (Thai)"
+      type: text
+      region: { x: 30.0, y: 16.0, w: 60.0, h: 6.0 }
+      qr-key: name-th
+
+    - id: name-en
+      label: "Name (English)"
+      type: text
+      region: { x: 30.0, y: 24.0, w: 60.0, h: 6.0 }
+      qr-key: name-en
+
+    - id: dob
+      label: "Date of Birth"
+      type: date
+      calendar: buddhist
+      region: { x: 30.0, y: 40.0, w: 30.0, h: 6.0 }
+
+    - id: issue
+      label: "Date of Issue"
+      type: date
+      calendar: buddhist
+      region: { x: 30.0, y: 48.0, w: 30.0, h: 6.0 }
+
+    - id: expiry
+      label: "Expiry Date"
+      type: date
+      calendar: buddhist
+      region: { x: 30.0, y: 56.0, w: 30.0, h: 6.0 }
+
+back:
+  fields:
+    - id: address
+      label: "Address"
+      type: text
+      region: { x: 5.0, y: 10.0, w: 90.0, h: 20.0 }
+
+    - id: qr
+      label: "QR Code"
+      type: qr
+      region: { x: 60.0, y: 40.0, w: 35.0, h: 35.0 }

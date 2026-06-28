@@ -1,23 +1,16 @@
 <!DOCTYPE html>
 <!--
   ════════════════════════════════════════════════════════════════════════════
-  basis — STANDALONE STARTER (shares the bizdocs look, NOT part of the series).
+  idcardreader — EXTRACTOR (daily-use tool).
 
-  Unlike _template/ (which links the monorepo's ../assets/), this app is
-  self-contained: it bundles its own copy of the shared design + runtime in
-  ./assets/. Those three files (style.css, ui.css, app.js) are kept
-  BYTE-IDENTICAL to bizdocs' shared assets so a bizdocs UI change can be dropped
-  straight in — see ./README.md and ./sync.sh.
+  One of two entry points sharing the basis chrome and assets/. This page reads
+  a template (templates/*.yaml), captures a card, extracts each field via OCR /
+  QR / crop, lets a human review/resolve it, then downloads two records:
+    • a PDF  — frozen "valid/expired as of <gen date>" banner
+    • an HTML — re-checks expiry on every open AND wraps every value in a
+      one-click COPY button for fast copy-out into a case file.
 
-  To build a real app from this folder:
-    1. Set <title>, the doc-title <h1>, and the 'basis-lang' localStorage key.
-    2. Replace buildExampleCard() with your form (use kb-* components) and
-       onDownload() with your real PDF (use pdf-lib).
-    3. Fill in config.yml: keep the header keys; add ui: strings to EVERY
-       language block; route all copy through S().
-    4. Drop a real favicon / PWA icon set into ./assets/.
-  Don't hand-rewrite the chrome (head, toolbar, header, footer) — keeping it as
-  shipped is what keeps the app pixel-identical to bizdocs.
+  Chrome is the unchanged basis shell; capture/extraction live in capture.js.
   ════════════════════════════════════════════════════════════════════════════
 -->
 <html lang="en">
@@ -25,32 +18,92 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="format-detection" content="telephone=no">
-<title>Basis</title>
+<title>ID Card Reader</title>
 
-<!-- Favicons / PWA. Drop a full icon set into assets/ for a real app. -->
 <link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
 <link rel="manifest" href="assets/site.webmanifest">
 <meta name="theme-color" content="#2f6fed">
 
-<!-- Restore persisted theme BEFORE first paint (avoids a flash). Keep this. -->
 <script>
   (function(){var t=localStorage.getItem('kb-theme');if(t)document.documentElement.setAttribute('data-theme',t);})();
 </script>
 
-<!-- CDN libraries: js-yaml (all apps) + pdf-lib (PDF output; new apps use pdf-lib). -->
+<!-- CDN libraries: pdf-lib + js-yaml (existing) and the extraction stack. -->
 <script src="https://unpkg.com/pdf-lib@1.17.1/dist/pdf-lib.min.js"></script>
 <script src="https://unpkg.com/js-yaml@4.1.0/dist/js-yaml.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/tesseract.js@7.0.0/dist/tesseract.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js"></script>
+<!-- PDF.js is an ES module → import it and expose the global capture.js waits for. -->
+<script type="module">
+  import * as pdfjsLib from 'https://cdn.jsdelivr.net/npm/pdfjs-dist@6.1.200/build/pdf.min.mjs';
+  pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@6.1.200/build/pdf.worker.min.mjs';
+  window.pdfjsLib = pdfjsLib;
+</script>
 
-<!-- Shared design + runtime — LOCAL copies (self-contained / standalone).
-     Kept byte-identical to bizdocs assets/. app.js MUST load before the inline <script>. -->
+<!-- Shared design + runtime (byte-identical bizdocs copies) + app-owned capture.js. -->
 <link rel="stylesheet" href="assets/style.css">
 <link rel="stylesheet" href="assets/ui.css">
 <script src="assets/app.js"></script>
+<script src="assets/capture.js"></script>
 
-<!-- App-specific styles ONLY (the shared look lives in assets/*.css).
-     Put column grids / bespoke layout here; empty is fine to start. -->
 <style>
-/* e.g. .basis-row { display:grid; grid-template-columns: 1fr 1fr auto; gap:8px; } */
+/* ── App-specific layout (shared look stays in assets/*.css) ───────────────── */
+.idc-drop {
+  border: 1px dashed var(--accent-border); border-radius: var(--radius);
+  background: var(--accent-soft); padding: 22px; text-align: center;
+  display: flex; flex-direction: column; gap: 10px; align-items: center;
+}
+.idc-drop.is-over { border-color: var(--accent); background: var(--surface-3); }
+.idc-drop .hint { color: var(--text-muted); font-size: var(--fs-small); }
+.idc-sides { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+@media (max-width: 720px){ .idc-sides { grid-template-columns: 1fr; } }
+.idc-preview { max-width: 100%; border-radius: var(--radius-sm); border: 1px solid var(--border); }
+
+/* Cropper (capture.js) */
+.idc-croptools { display: flex; gap: 8px; margin-bottom: 10px; }
+.idc-stage { position: relative; display: inline-block; max-width: 100%; line-height: 0;
+  background: var(--surface-3); border-radius: var(--radius-sm); touch-action: none; }
+.idc-stage__img { display: block; max-width: 100%; cursor: crosshair; }
+.idc-crop { position: absolute; border: 2px solid var(--accent);
+  box-shadow: 0 0 0 9999px rgba(20,24,30,.45); cursor: move; }
+.idc-crop__h { position: absolute; width: 12px; height: 12px; background: var(--accent);
+  border: 2px solid #fff; border-radius: 50%; }
+.idc-crop__h--nw { left: -7px; top: -7px; cursor: nwse-resize; }
+.idc-crop__h--ne { right: -7px; top: -7px; cursor: nesw-resize; }
+.idc-crop__h--sw { left: -7px; bottom: -7px; cursor: nesw-resize; }
+.idc-crop__h--se { right: -7px; bottom: -7px; cursor: nwse-resize; }
+
+.idc-thumbs { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 8px; }
+.idc-thumb { border: 2px solid var(--border-strong); border-radius: var(--radius-sm);
+  padding: 4px; cursor: pointer; background: var(--surface); }
+.idc-thumb:hover { border-color: var(--accent); }
+.idc-thumb img { display: block; max-height: 150px; }
+.idc-thumb .n { text-align: center; font-size: var(--fs-small); color: var(--text-muted); }
+
+/* Review rows */
+.idc-fieldrow { display: grid; grid-template-columns: 120px 1fr auto; gap: 14px;
+  align-items: start; padding: 12px 0; border-top: 1px solid var(--border); }
+.idc-fieldrow:first-of-type { border-top: 0; }
+.idc-fieldrow.is-conflict { background: var(--warning-soft); border-radius: var(--radius-sm);
+  padding: 12px; border-top: 0; margin: 6px 0; }
+@media (max-width: 640px){ .idc-fieldrow { grid-template-columns: 1fr; } }
+.idc-regimg { width: 120px; max-height: 80px; object-fit: contain; border: 1px solid var(--border);
+  border-radius: 4px; background: var(--surface-3); }
+.idc-photoimg { max-width: 120px; max-height: 150px; border-radius: 4px; border: 1px solid var(--border); }
+.idc-flabel { font-size: var(--fs-label); font-weight: 600; text-transform: uppercase;
+  letter-spacing: .03em; color: var(--text-muted); }
+.idc-review { display: inline-flex; align-items: center; gap: 6px; font-size: var(--fs-small);
+  color: var(--text-muted); cursor: pointer; white-space: nowrap; user-select: none; }
+.idc-review .mark { font-weight: 700; }
+.idc-review.is-ok .mark { color: var(--success); }
+.idc-review.is-no .mark { color: var(--danger); }
+.idc-cand { display: flex; gap: 8px; flex-wrap: wrap; margin: 6px 0; }
+.idc-cand .kb-btn { flex-direction: column; align-items: flex-start; gap: 2px; text-align: left; }
+.idc-cand .src { font-size: 10px; opacity: .7; text-transform: uppercase; }
+.idc-rawqr { font-family: var(--font-mono); font-size: 12px; word-break: break-all;
+  background: var(--surface-3); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 10px; }
+.idc-muted { color: var(--text-muted); font-size: var(--fs-small); }
+.idc-busy { text-align: center; padding: 30px; color: var(--text-muted); }
 </style>
 </head>
 <body>
@@ -59,22 +112,11 @@
 <script>
 (async function () {
 'use strict';
-/* This script is wrapped in an IIFE, so its top-level functions are NOT
- * globals — they cannot collide with app.js. Helpers from app.js ($, el,
- * makeSizeControl, kbAbout, lookupString, …) are visible in here. */
 
-let CFG;          // parsed config.yml
-let lang = 'en';  // active UI language
+let CFG;
+let lang = 'en';
+const S = (key, vars) => lookupString(CFG['ui-strings'], key, lang, CFG['default-code'], vars);
 
-// ── i18n ───────────────────────────────────────────────────────────────────
-// One string lookup, delegating to the shared lookupString(). Never hardcode
-// user-facing text — add a key to every language's `ui:` block and use S().
-function S(key, vars) {
-  return lookupString(CFG['ui-strings'], key, lang, CFG['default-code'], vars);
-}
-
-// Flatten localisation[lang].ui → ui-strings[key][lang] using the shared core.
-// Add your own data-specific maps (currencies, codes, …) after this.
 function normaliseConfig() {
   const loc = CFG && CFG.localisation;
   if (!loc) return;
@@ -83,145 +125,608 @@ function normaliseConfig() {
   CFG.languages = CFG.languages || languages;
   CFG['ui-strings'] = table;
 }
-
-// Copy the active language's About block onto flat fields the modal reads.
 function applyLang(lc) {
   lang = lc;
   const loc = CFG.localisation || {};
   const a = (loc[lc] && loc[lc].about) || (loc[CFG['default-code']] && loc[CFG['default-code']].about) || {};
-  CFG['about-title']   = a.title   || 'About';
+  CFG['about-title'] = a.title || 'About';
   CFG['about-content'] = a.content || '';
-  CFG['about-button']  = a.button  || 'Close';
+  CFG['about-button'] = a.button || 'Close';
 }
+const showAboutModal = () => kbAbout({ title: CFG['about-title'], contentMD: CFG['about-content'], closeLabel: CFG['about-button'] });
 
-function showAboutModal() {
-  return kbAbout({ title: CFG['about-title'], contentMD: CFG['about-content'], closeLabel: CFG['about-button'] });
-}
-
-// ── Render ─────────────────────────────────────────────────────────────────
-function render() {
-  const app = document.getElementById('app');
-  app.innerHTML = '';
-  const wrap = el('div', { className: 'kb-wrap' });
-
-  wrap.appendChild(buildToolbar());
-  wrap.appendChild(buildHeader());
-  wrap.appendChild(buildExampleCard());   // ← replace this with your form
-
-  // Action row
-  const actions = el('div', { className: 'kb-actions' });
-  actions.append(
-    el('button', { className: 'kb-btn kb-btn--ghost' }, S('save')),
-    el('button', { className: 'kb-btn kb-btn--primary', onClick: onDownload }, S('download'))
-  );
-  wrap.appendChild(actions);
-
-  wrap.appendChild(buildFooter());
-
-  app.appendChild(wrap);
-  updateThemeIcon();   // keep theme icons in sync after a (re)render
-}
-
-// Toolbar: language select · spacer · A−/A+ size · theme · about
+/* ── Chrome (unchanged basis shell) ──────────────────────────────────────── */
 function buildToolbar() {
   const toolbar = el('div', { className: 'kb-toolbar' });
-
   const langSel = el('select', { className: 'kb-select', 'aria-label': 'Language' });
   (CFG.languages || []).forEach(l => {
     const o = el('option', { value: l.code }, l.name || l.code);
-    if (l.code === lang) o.selected = true;
-    langSel.appendChild(o);
+    if (l.code === lang) o.selected = true; langSel.appendChild(o);
   });
-  langSel.addEventListener('change', () => {
-    applyLang(langSel.value);
-    localStorage.setItem('basis-lang', langSel.value);   // app-specific key
-    render();
-  });
-
-  const { seg: sizeSeg, label: szLabel } = makeSizeControl();
-  toolbar.append(
-    langSel,
-    el('div', { className: 'spacer' }),
-    sizeSeg, szLabel,
-    makeThemeButton(),
-    makeAboutButton(showAboutModal)
-  );
+  langSel.addEventListener('change', () => { applyLang(langSel.value); localStorage.setItem('idc-lang', langSel.value); render(); });
+  const { seg, label } = makeSizeControl();
+  toolbar.append(langSel, el('div', { className: 'spacer' }), seg, label, makeThemeButton(), makeAboutButton(showAboutModal));
   return toolbar;
 }
-
-// Header: brand wordmark (kBenestad mark + org/tagline) + right-aligned title.
 function buildHeader() {
   const header = el('header', { className: 'kb-header' });
-
   const brand = el('div', { className: 'kb-brand' });
   const tile = el('span', { className: 'logo' }); tile.innerHTML = KB_BRAND_SVG;
   const org = el('span', { className: 'org' });
-  org.appendChild(document.createTextNode(CFG.organization || 'kbenestad/basis'));
+  org.appendChild(document.createTextNode(CFG.organization || 'kbenestad/idcardreader'));
   const small = el('small'); small.textContent = CFG.tagline || S('subtitle');
-  org.appendChild(small);
-  brand.append(tile, org);
-
+  org.appendChild(small); brand.append(tile, org);
   const title = el('div', { className: 'kb-doctitle' });
-  title.appendChild(el('h1', null, 'basis'));   // ← your app name (add an icon SVG if you like)
-
+  title.appendChild(el('h1', null, S('app-title-extract')));
   header.append(brand, title);
   return header;
 }
-
-// Example content — DELETE and build your own cards/grids from kb-* components.
-function buildExampleCard() {
-  const card = el('div', { className: 'kb-card' });
-  card.appendChild(el('div', { className: 'kb-card__title' }, S('example-section')));
-  const grid = el('div', { className: 'kb-grid cols-2' });
-  grid.append(
-    field(S('field-name'), el('input', { className: 'kb-input', placeholder: S('ph-name') })),
-    field(S('field-date'), el('input', { className: 'kb-input', type: 'date' }))
-  );
-  card.appendChild(grid);
-  return card;
+function buildFooter() {
+  const sep = () => el('span', { className: 'sep' }, '·');
+  const footer = el('footer', { className: 'kb-footer' });
+  const mark = el('span', { className: 'kb-mark' }); mark.innerHTML = KB_FOOTER_MARK_SVG + 'kBenestad';
+  footer.append(mark,
+    sep(), el('span', null, '© 2026 Kristian Benestad'),
+    sep(), el('a', { href: 'template.html' }, S('app-title-builder')),
+    sep(), el('button', { type: 'button', onClick: showAboutModal }, CFG['about-title'] || 'About'));
+  return footer;
 }
-
 function field(label, input) {
   const f = el('div', { className: 'kb-field' });
   f.append(el('span', { className: 'kb-label' }, label), input);
   return f;
 }
 
-// Footer: kBenestad mark · © · repo link · About.
-function buildFooter() {
-  const sep = () => el('span', { className: 'sep' }, '·');
-  const footer = el('footer', { className: 'kb-footer' });
-  const mark = el('span', { className: 'kb-mark' }); mark.innerHTML = KB_FOOTER_MARK_SVG + 'kBenestad';
-  footer.append(
-    mark,
-    sep(), el('span', null, '© 2026 Kristian Benestad'),
-    sep(), el('a', { href: 'https://github.com/kbenestad/bizdocs', target: '_blank', rel: 'noopener' }, 'kbenestad/bizdocs'),
-    sep(), el('button', { type: 'button', onClick: showAboutModal }, CFG['about-title'] || 'About')
-  );
-  return footer;
+/* ── State ───────────────────────────────────────────────────────────────── */
+let manifest = [], templateList = [];
+let tpl = null;                                   // selected template
+const sideCanvas = { front: null, back: null };   // finalized working images
+let results = null;                                // array of field result objects
+const rawQr = { front: null, back: null };         // raw decoded QR per side
+let reviewDone = false;
+let busy = false;
+
+function resetExtraction() { results = null; reviewDone = false; rawQr.front = rawQr.back = null; }
+
+/* ── Render ──────────────────────────────────────────────────────────────── */
+function render() {
+  const app = document.getElementById('app');
+  app.innerHTML = '';
+  const wrap = el('div', { className: 'kb-wrap' });
+  wrap.append(buildToolbar(), buildHeader());
+  wrap.appendChild(buildDocTypeCard());
+  if (tpl) {
+    wrap.appendChild(buildCaptureCard());
+    if (results) wrap.appendChild(buildReviewCard());
+  }
+  wrap.appendChild(buildFooter());
+  app.appendChild(wrap);
+  updateThemeIcon();
 }
 
-// ── PDF output (pdf-lib) — minimal stub; build your real document here. ──────
-async function onDownload() {
-  const { PDFDocument, StandardFonts } = PDFLib;
+function buildDocTypeCard() {
+  const card = el('div', { className: 'kb-card' });
+  card.appendChild(el('div', { className: 'kb-card__title' }, S('doc-type-label')));
+  if (!templateList.length) { card.appendChild(el('p', { className: 'idc-muted' }, S('no-templates'))); return card; }
+  const sel = el('select', { className: 'kb-select' });
+  sel.appendChild(el('option', { value: '' }, S('doc-type-placeholder')));
+  templateList.forEach(t => { const o = el('option', { value: t.slug }, t.name || t.slug); if (tpl && tpl.slug === t.slug) o.selected = true; sel.appendChild(o); });
+  sel.addEventListener('change', () => {
+    tpl = templateList.find(t => t.slug === sel.value) ? JSON.parse(JSON.stringify(templateList.find(t => t.slug === sel.value).data)) : null;
+    sideCanvas.front = sideCanvas.back = null; resetExtraction(); render();
+  });
+  card.appendChild(sel);
+  return card;
+}
+
+function buildCaptureCard() {
+  const card = el('div', { className: 'kb-card' });
+  card.appendChild(el('div', { className: 'kb-card__title' }, S('app-title-extract')));
+  const sides = el('div', { className: 'idc-sides' });
+  sides.appendChild(sideBlock('front'));
+  if (tpl.back) sides.appendChild(sideBlock('back'));
+  else { const n = el('div'); n.appendChild(el('p', { className: 'idc-muted' }, S('no-back-note'))); sides.appendChild(n); }
+  card.appendChild(sides);
+
+  const needBack = !!tpl.back;
+  const ready = sideCanvas.front && (!needBack || sideCanvas.back);
+  const bar = el('div', { className: 'kb-actions', style: { marginTop: '14px' } });
+  const extractBtn = el('button', { className: 'kb-btn kb-btn--primary', onClick: runExtraction }, S('btn-extract'));
+  extractBtn.disabled = !ready || busy;
+  bar.appendChild(extractBtn);
+  if (busy) bar.appendChild(el('span', { className: 'idc-muted' }, S('extracting')));
+  card.appendChild(bar);
+  return card;
+}
+
+function sideBlock(side) {
+  const box = el('div');
+  box.appendChild(el('div', { className: 'idc-flabel', style: { marginBottom: '6px' } }, S(side === 'front' ? 'step-front' : 'step-back')));
+  const host = el('div');
+  box.appendChild(host);
+  if (sideCanvas[side]) {
+    host.appendChild(el('img', { className: 'idc-preview', src: canvasToDataURL(sideCanvas[side], 'image/jpeg', 0.8) }));
+    host.appendChild(el('div', { className: 'kb-actbar', style: { marginTop: '8px' } },
+      el('button', { className: 'kb-btn kb-btn--ghost kb-btn--sm', onClick: () => { sideCanvas[side] = null; resetExtraction(); render(); } }, S('recapture'))));
+  } else {
+    mountCapture(host, side, () => { resetExtraction(); render(); });
+  }
+  return box;
+}
+
+/* Upload → page-pick → crop/rotate → store finalized side canvas. */
+function mountCapture(host, side, onDone) {
+  host.innerHTML = '';
+  const drop = el('div', { className: 'idc-drop' });
+  drop.appendChild(el('div', { className: 'hint' }, S('capture-hint')));
+  const fileInput = el('input', { type: 'file', accept: 'image/*,application/pdf', style: { display: 'none' } });
+  drop.append(el('button', { className: 'kb-btn kb-btn--primary', onClick: () => fileInput.click() }, S('btn-upload')), fileInput);
+  host.appendChild(drop);
+  const work = el('div', { style: { marginTop: '10px' } });
+  host.appendChild(work);
+
+  ['dragover', 'dragleave', 'drop'].forEach(ev => drop.addEventListener(ev, e => {
+    e.preventDefault();
+    if (ev === 'dragover') drop.classList.add('is-over'); else drop.classList.remove('is-over');
+    if (ev === 'drop' && e.dataTransfer.files[0]) handleFile(e.dataTransfer.files[0]);
+  }));
+  fileInput.addEventListener('change', () => { if (fileInput.files[0]) handleFile(fileInput.files[0]); });
+
+  async function handleFile(file) {
+    work.innerHTML = '<p class="idc-muted">…</p>';
+    let cap;
+    try { cap = await captureToImage(file); }
+    catch (e) { work.innerHTML = ''; work.appendChild(noteErr(e.message)); return; }
+    if (cap.isPdf && cap.pageCount > 1) showPagePicker(cap); else showCropper(cap.canvas);
+  }
+  function showPagePicker(cap) {
+    work.innerHTML = '';
+    work.appendChild(el('p', { className: 'idc-muted' }, S('pick-page')));
+    const thumbs = el('div', { className: 'idc-thumbs' });
+    cap.thumbnails.forEach(t => {
+      const cell = el('div', { className: 'idc-thumb', onClick: async () => { work.innerHTML = '<p class="idc-muted">…</p>'; showCropper(await cap.pickPage(t.page)); } });
+      cell.append(el('img', { src: t.dataUrl }), el('div', { className: 'n' }, String(t.page)));
+      thumbs.appendChild(cell);
+    });
+    work.appendChild(thumbs);
+  }
+  function showCropper(canvas) {
+    work.innerHTML = '';
+    const cropHost = el('div'); work.appendChild(cropHost);
+    const ctl = attachCropRotate(canvas, cropHost);
+    work.appendChild(el('div', { className: 'kb-actbar', style: { marginTop: '12px' } },
+      el('button', { className: 'kb-btn kb-btn--primary', onClick: () => { sideCanvas[side] = ctl.getResult(); ctl.destroy(); onDone(); } }, S('use-this-image'))));
+  }
+}
+
+/* ── Extraction ──────────────────────────────────────────────────────────── */
+async function runExtraction() {
+  busy = true; render();
+  const ocrLang = CFG['ocr-language'] || 'eng';
+  const out = [];
+  for (const side of ['front', 'back']) {
+    if (!tpl[side] || !sideCanvas[side]) continue;
+    const sideObj = tpl[side];
+    // 1) decode QR fields first → build the side's parsed payload.
+    let payload = null;
+    for (const f of sideObj.fields.filter(f => f.type === 'qr')) {
+      const crop = cropRegion(sideCanvas[side], f.region);
+      const raw = decodeQr(crop);
+      rawQr[side] = raw;
+      if (raw && sideObj['qr-parse']) payload = parseQrPayload(raw, sideObj['qr-parse']);
+    }
+    // 2) all fields.
+    for (const f of sideObj.fields) {
+      const crop = cropRegion(sideCanvas[side], f.region);
+      const r = {
+        id: f.id, label: f.label || f.id, type: f.type, side, calendar: f.calendar || 'gregorian',
+        regionDataUrl: crop.toDataURL('image/jpeg', 0.8),
+        ocrValue: '', qrValue: '', value: '', conflict: false, resolved: true, reviewed: true,
+        photoDataUrl: null,
+      };
+      if (f.type === 'photo') {
+        r.photoDataUrl = crop.toDataURL('image/jpeg', 0.85);
+        r.value = '';
+      } else if (f.type === 'qr') {
+        r.value = rawQr[side] || '';
+      } else {
+        r.ocrValue = await ocrField(crop, ocrLang);
+        r.value = r.ocrValue;
+        if (f['qr-key'] && payload && payload[f['qr-key']] != null) {
+          r.qrValue = payload[f['qr-key']];
+          if (r.qrValue && conflictBetween(r.ocrValue, r.qrValue, r.type, r.calendar)) {
+            r.conflict = true; r.resolved = false; r.reviewed = false; r.value = '';
+          } else if (r.qrValue && !r.ocrValue) {
+            r.value = r.qrValue;   // OCR empty, QR present → trust QR
+          }
+        }
+      }
+      out.push(r);
+    }
+  }
+  results = out; busy = false; render();
+  const review = document.getElementById('idc-review-card');
+  if (review) review.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+function normForCompare(s) { return String(s || '').replace(/\s+/g, '').toLowerCase(); }
+function conflictBetween(ocr, qr, type, calendar) {
+  if (type === 'date') {
+    const a = normaliseDate(ocr, calendar), b = normaliseDate(qr, calendar);
+    if (a && b) return a !== b;
+    return normForCompare(ocr) !== normForCompare(qr);
+  }
+  return normForCompare(ocr) !== normForCompare(qr);
+}
+
+/* ── Review screen ───────────────────────────────────────────────────────── */
+function buildReviewCard() {
+  const card = el('div', { className: 'kb-card', id: 'idc-review-card' });
+  card.appendChild(el('div', { className: 'kb-card__title' }, S('section-review')));
+
+  results.forEach((r, i) => card.appendChild(reviewRow(r, i)));
+
+  // raw QR payload(s) for audit
+  ['front', 'back'].forEach(side => {
+    if (rawQr[side]) {
+      card.appendChild(el('div', { className: 'idc-flabel', style: { marginTop: '14px', marginBottom: '4px' } }, S('raw-qr-label') + ' · ' + S(side === 'front' ? 'step-front' : 'step-back')));
+      card.appendChild(el('div', { className: 'idc-rawqr' }, rawQr[side]));
+    }
+  });
+
+  const unresolved = results.filter(r => r.conflict && !r.resolved).length;
+  const gate = el('div', { style: { marginTop: '16px' } });
+  if (unresolved > 0) {
+    const n = el('div', { className: 'kb-note kb-note--warning' });
+    n.innerHTML = '<span>⚠</span><div>' + S('gate-note') + '</div>';
+    gate.appendChild(n);
+  }
+  const actions = el('div', { className: 'kb-actions', style: { marginTop: '8px' } });
+  const reviewBtn = el('button', { className: 'kb-btn kb-btn--soft', onClick: () => { reviewDone = true; render(); document.getElementById('idc-review-card').scrollIntoView({ block: 'end' }); } }, S('btn-review-done'));
+  reviewBtn.disabled = unresolved > 0 || reviewDone;
+  actions.appendChild(reviewBtn);
+  if (reviewDone) actions.appendChild(el('span', { className: 'idc-muted' }, S('review-done-state')));
+
+  const pdfBtn = el('button', { className: 'kb-btn kb-btn--primary', onClick: () => generatePdf() }, S('btn-download-pdf'));
+  const htmlBtn = el('button', { className: 'kb-btn kb-btn--primary', onClick: () => generateHtml() }, S('btn-download-html'));
+  pdfBtn.disabled = htmlBtn.disabled = !(reviewDone && unresolved === 0);
+  actions.append(el('div', { className: 'spacer' }), htmlBtn, pdfBtn);
+  gate.appendChild(actions);
+
+  gate.appendChild(el('div', { className: 'kb-actbar', style: { marginTop: '10px' } },
+    el('button', { className: 'kb-btn kb-btn--ghost kb-btn--sm', onClick: () => { resetExtraction(); render(); } }, S('start-over'))));
+  card.appendChild(gate);
+  return card;
+}
+
+function reviewRow(r, i) {
+  const row = el('div', { className: 'idc-fieldrow' + (r.conflict && !r.resolved ? ' is-conflict' : '') });
+
+  // col 1: region / photo preview
+  const imgCol = el('div');
+  if (r.type === 'photo' && r.photoDataUrl) imgCol.appendChild(el('img', { className: 'idc-photoimg', src: r.photoDataUrl }));
+  else imgCol.appendChild(el('img', { className: 'idc-regimg', src: r.regionDataUrl }));
+  row.appendChild(imgCol);
+
+  // col 2: label + value / candidates
+  const mid = el('div');
+  mid.appendChild(el('div', { className: 'idc-flabel', style: { marginBottom: '4px' } }, r.label));
+
+  if (r.type === 'photo') {
+    mid.appendChild(el('p', { className: 'idc-muted' }, r.photoDataUrl ? '' : S('photo-missing')));
+  } else if (r.conflict && !r.resolved) {
+    mid.appendChild(el('p', { className: 'idc-muted' }, S('conflict-note')));
+    const cand = el('div', { className: 'idc-cand' });
+    cand.append(
+      candBtn(S('source-ocr'), r.ocrValue, () => resolveField(i, r.ocrValue)),
+      candBtn(S('source-qr'), r.qrValue, () => resolveField(i, r.qrValue))
+    );
+    mid.appendChild(cand);
+    const input = el('input', { className: 'kb-input', placeholder: S('col-value'), value: '' });
+    input.addEventListener('input', () => { if (input.value.trim()) resolveField(i, input.value, true); });
+    mid.appendChild(input);
+  } else {
+    const input = el('input', { className: 'kb-input', value: r.value || '' });
+    input.addEventListener('input', () => { r.value = input.value; });
+    mid.appendChild(input);
+    if (r.qrValue && !r.conflict) mid.appendChild(el('div', { className: 'idc-muted', style: { marginTop: '3px' } }, S('source-qr') + ': ' + r.qrValue));
+  }
+  row.appendChild(mid);
+
+  // col 3: reviewed toggle (informational; default true)
+  const rev = el('span', { className: 'idc-review ' + (r.reviewed ? 'is-ok' : 'is-no') });
+  rev.append(el('span', null, S('reviewed-label') + ':'), el('span', { className: 'mark' }, r.reviewed ? '✓' : '✗'));
+  if (r.type !== 'photo') {
+    rev.style.cursor = 'pointer';
+    rev.addEventListener('click', () => { if (r.conflict && !r.resolved) return; r.reviewed = !r.reviewed; render(); });
+  }
+  row.appendChild(rev);
+  return row;
+}
+
+function candBtn(srcLabel, value, onClick) {
+  const b = el('button', { className: 'kb-btn kb-btn--ghost', onClick });
+  b.append(el('span', { className: 'src' }, srcLabel), el('span', null, value || S('field-empty')));
+  return b;
+}
+function resolveField(i, value, fromInput) {
+  const r = results[i];
+  r.value = value; r.conflict = false; r.resolved = true; r.reviewed = true;
+  if (!fromInput) render();
+}
+
+/* ── Expiry computation ──────────────────────────────────────────────────── */
+function expiryInfo() {
+  const ef = tpl['expiry-field'];
+  if (!ef) return { hasField: false };
+  const r = results.find(x => x.side === ef.side && x.id === ef.id);
+  if (!r) return { hasField: false };
+  const iso = normaliseDate(r.value, r.calendar);
+  if (!iso) return { hasField: true, recognised: false, raw: r.value };
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  const exp = new Date(iso + 'T00:00:00');
+  return { hasField: true, recognised: true, iso, expired: exp < today };
+}
+
+/* ── filename ────────────────────────────────────────────────────────────── */
+function bestName() {
+  const byId = id => { const r = results.find(x => x.id === id && x.value); return r ? r.value : ''; };
+  let v = results.find(r => /name/i.test(r.id) && r.value);
+  if (v) return v.value;
+  v = results.find(r => /(^|[-_])id($|[-_])|number/i.test(r.id) && r.value);
+  if (v) return v.value;
+  return tpl.slug;
+}
+function outputFilename(ext) {
+  const today = new Date().toISOString().slice(0, 10);
+  const namePart = bestName().replace(/[^\p{L}\p{N}]+/gu, '-').replace(/(^-|-$)/g, '').slice(0, 40) || tpl.slug;
+  return `${tpl.slug}-${namePart}-${today}.${ext}`;
+}
+
+/* ── PDF output (pdf-lib) — frozen banner ────────────────────────────────── */
+async function generatePdf() {
+  const { PDFDocument, StandardFonts, rgb } = PDFLib;
   const doc = await PDFDocument.create();
-  const page = doc.addPage();                 // A4 by default
   const font = await doc.embedFont(StandardFonts.Helvetica);
-  page.drawText('basis', { x: 50, y: 790, size: 18, font });
+  const bold = await doc.embedFont(StandardFonts.HelveticaBold);
+  const A4 = [595.28, 841.89], LETTER = [612, 792];
+  const size = (CFG['page-size'] || 'A4').toLowerCase() === 'letter' ? LETTER : A4;
+  let page = doc.addPage(size);
+  const M = 48; let y = size[1] - M;
+  const safe = s => String(s == null ? '' : s).replace(/[^\x20-\x7E\xA0-\xFF]/g, c => c === '\n' ? '\n' : '?');
+  const line = (text, opts = {}) => {
+    const f = opts.bold ? bold : font, sz = opts.size || 10;
+    if (y < M + 40) { page = doc.addPage(size); y = size[1] - M; }
+    page.drawText(safe(text), { x: opts.x || M, y, size: sz, font: f, color: opts.color || rgb(0.08, 0.1, 0.12) });
+    y -= (opts.lead || sz + 6);
+  };
+
+  line(S('output-title'), { bold: true, size: 16 });
+  line(tpl.name || tpl.slug, { size: 11, color: rgb(0.37, 0.41, 0.46) });
+  const genDate = new Date().toISOString().slice(0, 10);
+  line(S('generated-on') + ': ' + genDate, { size: 9, color: rgb(0.37, 0.41, 0.46), lead: 18 });
+
+  // Frozen expiry banner
+  const exp = expiryInfo();
+  let bannerText, bannerCol;
+  if (!exp.hasField) { bannerText = S('no-expiry-field'); bannerCol = rgb(0.37, 0.41, 0.46); }
+  else if (!exp.recognised) { bannerText = S('expiry-unknown'); bannerCol = rgb(0.79, 0.52, 0.12); }
+  else if (exp.expired) { bannerText = S('expired-banner') + ' — ' + S('expired-asof', { date: exp.iso }); bannerCol = rgb(0.84, 0.27, 0.27); }
+  else { bannerText = S('valid-banner') + ' — ' + S('valid-asof', { date: genDate }); bannerCol = rgb(0.12, 0.62, 0.37); }
+  page.drawRectangle({ x: M, y: y - 6, width: size[0] - 2 * M, height: 26, color: bannerCol });
+  page.drawText(safe(bannerText), { x: M + 10, y: y + 2, size: 11, font: bold, color: rgb(1, 1, 1) });
+  y -= 40;
+
+  // Side images
+  for (const side of ['front', 'back']) {
+    if (!sideCanvas[side]) continue;
+    try {
+      const jpg = await doc.embedJpg(dataUrlToBytes(sideCanvas[side].toDataURL('image/jpeg', 0.7)));
+      const maxW = (size[0] - 2 * M - 16) / 2;
+      const scale = Math.min(maxW / jpg.width, 120 / jpg.height);
+      const w = jpg.width * scale, h = jpg.height * scale;
+      if (y - h < M) { page = doc.addPage(size); y = size[1] - M; }
+      const x = side === 'front' ? M : M + maxW + 16;
+      page.drawImage(jpg, { x, y: y - h, width: w, height: h });
+      if (side === 'back' || !sideCanvas.back) y -= h + 16;
+    } catch (e) { /* skip unembeddable image */ }
+  }
+
+  // Field table
+  line('', { lead: 4 });
+  results.forEach(r => {
+    if (r.type === 'photo') return;
+    let val = r.value || '';
+    if (r.type === 'date') { const iso = normaliseDate(r.value, r.calendar); if (iso) val = iso + (val && iso !== val ? '  (' + val + ')' : ''); }
+    line(r.label + ':', { bold: true, size: 10, lead: 14 });
+    line('   ' + (val || S('field-empty')), { size: 11, lead: 18 });
+  });
+
+  // Raw QR audit
+  ['front', 'back'].forEach(side => {
+    if (rawQr[side]) { line(S('raw-qr-label') + ' (' + side + '):', { bold: true, size: 9, color: rgb(0.37, 0.41, 0.46), lead: 12 }); line('   ' + rawQr[side], { size: 8, color: rgb(0.37, 0.41, 0.46), lead: 14 }); }
+  });
+
   const bytes = await doc.save();
-  const url = URL.createObjectURL(new Blob([bytes], { type: 'application/pdf' }));
-  const a = el('a', { href: url, download: 'basis.pdf' }); a.click();
-  URL.revokeObjectURL(url);
+  downloadBlob(bytes, outputFilename('pdf'), 'application/pdf');
 }
 
-// ── Boot ───────────────────────────────────────────────────────────────────
+/* ── HTML output — standalone record, live expiry re-check, COPY buttons ─── */
+function generateHtml() {
+  const exp = expiryInfo();
+  const genDate = new Date().toISOString().slice(0, 10);
+  const fields = results.filter(r => r.type !== 'photo').map(r => {
+    let display = r.value || '';
+    if (r.type === 'date') { const iso = normaliseDate(r.value, r.calendar); if (iso) display = iso; }
+    return { label: r.label, value: display, type: r.type };
+  });
+  const photo = results.find(r => r.type === 'photo' && r.photoDataUrl);
+  const data = {
+    docType: tpl.name || tpl.slug,
+    generated: genDate,
+    expiryIso: exp.recognised ? exp.iso : null,
+    expiryHasField: !!exp.hasField,
+    expiryRecognised: !!exp.recognised,
+    fields,
+    rawQr: { front: rawQr.front, back: rawQr.back },
+  };
+  const strings = {
+    title: S('output-title'), generatedOn: S('generated-on'),
+    valid: S('valid-banner'), expired: S('expired-banner'),
+    validAsof: S('valid-asof', { date: '%D' }), expiredAsof: S('expired-asof', { date: '%D' }),
+    unknown: S('expiry-unknown'), noField: S('no-expiry-field'),
+    copy: S('copy'), copied: S('copied'), rawQr: S('raw-qr-label'),
+    empty: S('field-empty'), recheck: S('live-recheck-note'),
+  };
+  const html = buildStandaloneHtml(data, strings, {
+    frontImg: sideCanvas.front ? sideCanvas.front.toDataURL('image/jpeg', 0.72) : null,
+    backImg: sideCanvas.back ? sideCanvas.back.toDataURL('image/jpeg', 0.72) : null,
+    photoImg: photo ? photo.photoDataUrl : null,
+  });
+  downloadBlob(html, outputFilename('html'), 'text/html');
+}
+
+/* Build a self-contained HTML record. No bizdocs chrome (decision 16): a few
+ * inline styles, the data as JSON, images as data URIs, and one small script
+ * that (a) re-computes valid/expired from new Date() on every load and
+ * (b) wires a one-click COPY button onto every field value. */
+function buildStandaloneHtml(data, strings, imgs) {
+  const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  const accent = CFG['accent-colour'] || '#2f6fed';
+  const fieldRows = data.fields.map((f, i) => `
+      <div class="row">
+        <div class="lab">${esc(f.label)}</div>
+        <div class="valwrap">
+          <span class="val" id="v${i}">${esc(f.value) || '<span class=empty>' + esc(strings.empty) + '</span>'}</span>
+          ${f.value ? `<button class="copy" data-copy="v${i}" aria-label="${esc(strings.copy)} ${esc(f.label)}">${esc(strings.copy)}</button>` : ''}
+        </div>
+      </div>`).join('');
+  const photoBlock = imgs.photoImg ? `<img class="photo" src="${imgs.photoImg}" alt="photo">` : '';
+  const sideImgs = [imgs.frontImg, imgs.backImg].filter(Boolean).map(s => `<img class="side" src="${s}" alt="card">`).join('');
+  const rawQrBlock = (data.rawQr.front || data.rawQr.back) ? `
+    <details class="qr"><summary>${esc(strings.rawQr)}</summary>
+      ${['front', 'back'].filter(s => data.rawQr[s]).map(s => `<div class="qrrow"><b>${s}</b>: <code>${esc(data.rawQr[s])}</code></div>`).join('')}
+    </details>` : '';
+
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>${esc(strings.title)} — ${esc(data.docType)}</title>
+<style>
+  :root { --accent:${accent}; }
+  * { box-sizing:border-box; }
+  body { font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,system-ui,sans-serif;
+    margin:0; padding:28px; color:#14181e; background:#f4f6fa; line-height:1.5; }
+  .doc { max-width:760px; margin:0 auto; background:#fff; border:1px solid #e3e7ee; border-radius:10px;
+    box-shadow:0 4px 18px rgba(20,24,30,.06); padding:28px 30px; }
+  h1 { font-size:20px; margin:0 0 2px; }
+  .sub { color:#5f6975; font-size:13px; margin-bottom:16px; }
+  .banner { display:inline-block; font-weight:700; color:#fff; padding:8px 16px; border-radius:6px;
+    font-size:14px; letter-spacing:.02em; margin-bottom:18px; }
+  .imgs { display:flex; gap:12px; flex-wrap:wrap; align-items:flex-start; margin-bottom:18px; }
+  .side { max-width:300px; max-height:190px; border-radius:6px; border:1px solid #e3e7ee; }
+  .photo { max-width:110px; max-height:150px; border-radius:6px; border:1px solid #e3e7ee; }
+  .row { display:grid; grid-template-columns:200px 1fr; gap:14px; padding:9px 0; border-top:1px solid #eef1f5; }
+  .row:first-of-type { border-top:0; }
+  .lab { font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:.04em; color:#5f6975; padding-top:3px; }
+  .valwrap { display:flex; align-items:center; gap:10px; min-width:0; }
+  .val { font-size:16px; word-break:break-word; }
+  .empty { color:#9aa3af; font-style:italic; }
+  .copy { flex:0 0 auto; cursor:pointer; border:1px solid #d3d9e2; background:#f4f7fb; color:#3a434f;
+    border-radius:6px; padding:4px 10px; font-size:12px; font-weight:600; }
+  .copy:hover { border-color:var(--accent); color:var(--accent); }
+  .copy.done { background:var(--accent); color:#fff; border-color:var(--accent); }
+  .qr { margin-top:18px; font-size:13px; }
+  .qr summary { cursor:pointer; color:#5f6975; }
+  .qrrow { margin-top:6px; word-break:break-all; }
+  code { font-family:ui-monospace,Menlo,Consolas,monospace; font-size:12px; }
+  .foot { margin-top:22px; padding-top:14px; border-top:1px solid #eef1f5; font-size:11px; color:#9aa3af; }
+  @media print { body { background:#fff; padding:0; } .doc { box-shadow:none; border:0; } .copy { display:none; } }
+</style>
+</head>
+<body>
+<div class="doc">
+  <h1>${esc(strings.title)}</h1>
+  <div class="sub">${esc(data.docType)} · ${esc(strings.generatedOn)} ${esc(data.generated)}</div>
+  <div class="banner" id="banner">…</div>
+  <div class="imgs">${sideImgs}${photoBlock}</div>
+  <div class="fields">${fieldRows}</div>
+  ${rawQrBlock}
+  <div class="foot">${esc(strings.recheck)}</div>
+</div>
+<script id="record-data" type="application/json">${JSON.stringify({ expiryIso: data.expiryIso, expiryHasField: data.expiryHasField, expiryRecognised: data.expiryRecognised }).replace(/</g, '\\u003c')}<\/script>
+<script>
+(function(){
+  var D = JSON.parse(document.getElementById('record-data').textContent);
+  var T = ${JSON.stringify(strings)};
+  // (a) Re-check expiry against today's date, every time the file is opened.
+  var b = document.getElementById('banner');
+  function fmt(t, d){ return t.replace('%D', d); }
+  if (!D.expiryHasField) { b.textContent = T.noField; b.style.background = '#5f6975'; }
+  else if (!D.expiryRecognised || !D.expiryIso) { b.textContent = T.unknown; b.style.background = '#c9851f'; }
+  else {
+    var today = new Date(); today.setHours(0,0,0,0);
+    var exp = new Date(D.expiryIso + 'T00:00:00');
+    if (exp < today) { b.textContent = T.expired + ' — ' + fmt(T.expiredAsof, D.expiryIso); b.style.background = '#d64545'; }
+    else { b.textContent = T.valid + ' — ' + fmt(T.validAsof, new Date().toISOString().slice(0,10)); b.style.background = '#1f9d5f'; }
+  }
+  // (b) One-click copy on every field value.
+  document.querySelectorAll('.copy').forEach(function(btn){
+    btn.addEventListener('click', function(){
+      var el = document.getElementById(btn.getAttribute('data-copy'));
+      var text = el ? el.innerText : '';
+      var done = function(){ var o = btn.textContent; btn.textContent = T.copied; btn.classList.add('done');
+        setTimeout(function(){ btn.textContent = T.copy; btn.classList.remove('done'); }, 1200); };
+      if (navigator.clipboard && navigator.clipboard.writeText) { navigator.clipboard.writeText(text).then(done, fallback); }
+      else fallback();
+      function fallback(){ var r = document.createRange(); r.selectNode(el);
+        var sel = getId(); sel.removeAllRanges(); sel.addRange(r);
+        try { document.execCommand('copy'); done(); } catch(e){} sel.removeAllRanges(); }
+      function getId(){ return window.getSelection(); }
+    });
+  });
+})();
+<\/script>
+</body>
+</html>`;
+}
+
+/* ── helpers ─────────────────────────────────────────────────────────────── */
+function noteErr(msg) { const n = el('div', { className: 'kb-note kb-note--error' }); n.innerHTML = '<span>⚠</span><div>' + msg + '</div>'; return n; }
+function dataUrlToBytes(dataUrl) {
+  const b64 = dataUrl.split(',')[1]; const bin = atob(b64);
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  return bytes;
+}
+function downloadBlob(content, filename, type) {
+  const url = URL.createObjectURL(new Blob([content], { type }));
+  const a = el('a', { href: url, download: filename }); document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+async function loadTemplates() {
+  try { const res = await fetch('templates/manifest.json'); manifest = res.ok ? await res.json() : []; }
+  catch (e) { manifest = []; }
+  templateList = [];
+  for (const file of manifest) {
+    try { const r = await fetch('templates/' + file); if (!r.ok) continue;
+      const data = jsyaml.load(await r.text());
+      templateList.push({ file, name: data.name, slug: data.slug || file.replace(/\.ya?ml$/, ''), data });
+    } catch (e) { /* skip */ }
+  }
+}
+
+/* ── Boot ────────────────────────────────────────────────────────────────── */
 try {
-  CFG = await loadYamlConfig();   // fetch + parse config.yml (shared helper)
+  CFG = await loadYamlConfig();
   normaliseConfig();
-  applyAccent(CFG);               // apply config accent-colour to --accent
-  initFontScale();                // restore persisted text size
-  lang = localStorage.getItem('basis-lang') || CFG['default-code'] || 'en';
+  applyAccent(CFG);
+  initFontScale();
+  lang = localStorage.getItem('idc-lang') || CFG['default-code'] || 'en';
   applyLang(lang);
+  await loadTemplates();
   render();
 } catch (e) {
   document.getElementById('app').innerHTML =

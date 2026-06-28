@@ -1,11 +1,10 @@
 # =============================================================================
-# basis — Configuration
+# idcardreader — Configuration
 # =============================================================================
-# basis is the STANDALONE starter: it shares the bizdocs design system but is
-# self-contained (it bundles its own assets/) and is NOT part of the app series.
-# Copy this folder to start a standalone app, then rename and replace the marked
-# "app-specific" parts. The keys below are the standard bizdocs config header;
-# keep them and add your own (currencies, accounts, products, codes, …).
+# Standard bizdocs config header (kept from the basis starter) + a localisation
+# block carrying every user-facing string for BOTH entry points: index.html
+# (the extractor) and template.html (the template builder). Never hardcode a
+# user-facing string in the page — add a key here and look it up via S().
 
 # Organization
 organization:                # leave blank to show the kBenestad wordmark
@@ -28,60 +27,133 @@ font-size: 10
 # Branding — overrides the --accent token for this app
 accent-colour: "#2f6fed"
 
+# OCR language(s) handed to Tesseract.js for text/date fields (e.g. eng, tha,
+# eng+tha). Trained data downloads on first use and is cached by the browser.
+ocr-language: eng
+
 # ── Localisation ──────────────────────────────────────────────────────────────
-# Every user-facing string lives here, under each language's `ui:` block, and is
-# looked up via S('key'). Use {token} placeholders for interpolation.
 localisation:
   default-language: en
 
   languages:
     - code: en
       name: English
-    - code: de
-      name: Deutsch
 
   en:
     about:
       title: "About"
       button: "Close"
       content: |
-        ### basis
-        A standalone starter that shares the **bizdocs** look and runtime, but
-        is self-contained (it bundles its own assets/) and lives outside the app
-        series. Toolbar, theme, text-size control, language switch, About modal
-        and footer are already wired up.
+        ### ID Card Reader
+        A no-backend tool that extracts structured fields (text, dates, photo,
+        QR) from photos or scans of ID documents, using per-document **templates**.
 
-        Replace the example card with your own form and PDF output.
+        - **This page** (index) is the extractor for daily use: pick a document
+          type, capture the card, review the fields, and download a **PDF** and a
+          standalone **HTML** record. The HTML wraps every value in a one-click
+          **copy** button and re-checks the expiry date each time it is opened.
+        - **template.html** is the setup-time builder: calibrate where each field
+          sits on a card once, then export a template file.
+
+        Everything runs in your browser — nothing is uploaded to a server.
 
         **Source:** [kbenestad/bizdocs](https://github.com/kbenestad/bizdocs)
     ui:
-      subtitle: "Standalone starter"
-      example-section: "Example section"
-      field-name: "Name"
-      ph-name: "Full name"
-      field-date: "Date"
+      subtitle: "Template-based ID extraction"
       save: "Save"
-      download: "Download PDF"
+      download: "Download"
+      start-over: "Start over"
 
-  de:
-    about:
-      title: "Über"
-      button: "Schließen"
-      content: |
-        ### basis
-        Ein eigenständiges Grundgerüst, das Aussehen und Laufzeit von
-        **bizdocs** teilt, aber in sich geschlossen ist (eigene assets/) und
-        außerhalb der App-Serie liegt. Symbolleiste, Theme, Textgröße,
-        Sprachwahl, Über-Dialog und Fußzeile sind bereits eingebunden.
+      # ── Extractor (index.html) ──
+      app-title-extract: "ID Reader"
+      doc-type-label: "Document type"
+      doc-type-placeholder: "Select a document type…"
+      no-templates: "No templates found. Build one with the template builder first."
+      step-front: "Front side"
+      step-back: "Back side"
+      capture-hint: "Upload a photo, scan, or PDF of the card."
+      btn-upload: "Choose file"
+      btn-camera: "Use camera"
+      use-this-image: "Use this image"
+      recapture: "Replace image"
+      pick-page: "This PDF has several pages — choose the one for this side:"
+      no-back-note: "This document type has no back side."
+      btn-extract: "Extract fields"
+      extracting: "Extracting… the first run is slower while OCR language data downloads."
+      section-review: "Review extracted fields"
+      col-region: "Region"
+      col-field: "Field"
+      col-value: "Value"
+      reviewed-label: "Reviewed"
+      conflict-note: "OCR and QR disagree — pick the correct value (or type a third)."
+      conflict-pick-ocr: "Use OCR value"
+      conflict-pick-qr: "Use QR value"
+      source-ocr: "OCR"
+      source-qr: "QR"
+      raw-qr-label: "Raw QR payload"
+      field-empty: "(empty)"
+      photo-missing: "No photo region captured"
+      gate-note: "Resolve every QR/OCR conflict, then confirm the review to enable output."
+      btn-review-done: "Final review done"
+      review-done-state: "Review confirmed — you can generate the record."
+      btn-download-pdf: "Download PDF"
+      btn-download-html: "Download HTML"
+      output-title: "ID document record"
+      generated-on: "Generated"
+      valid-banner: "VALID"
+      expired-banner: "EXPIRED"
+      valid-asof: "as of {date}"
+      expired-asof: "expiry date was {date}"
+      expiry-unknown: "Expiry date not recognised"
+      no-expiry-field: "No expiry date for this document type"
+      copy: "Copy"
+      copied: "Copied"
+      copy-aria: "Copy {field}"
+      live-recheck-note: "Expiry status is re-checked against today's date each time this file is opened."
 
-        Ersetzen Sie die Beispielkarte durch Ihr eigenes Formular und PDF.
-
-        **Quellcode:** [kbenestad/bizdocs](https://github.com/kbenestad/bizdocs)
-    ui:
-      subtitle: "Eigenständige Vorlage"
-      example-section: "Beispielabschnitt"
-      field-name: "Name"
-      ph-name: "Vollständiger Name"
-      field-date: "Datum"
-      save: "Speichern"
-      download: "PDF herunterladen"
+      # ── Template builder (template.html) ──
+      app-title-builder: "Template Builder"
+      builder-intro: "Calibrate where each field sits on a document, then export a template the extractor can use."
+      tpl-select-label: "Start from"
+      tpl-new: "➕ New template"
+      tpl-new-name: "Template name"
+      tpl-new-name-ph: "e.g. Thai National ID Card"
+      tpl-new-slug: "Slug (filename stem)"
+      tpl-new-slug-ph: "e.g. thai-id-card"
+      tpl-slug-collision: "A template with this slug already exists — exporting will overwrite it on drag-in."
+      load-front: "Load front image"
+      load-back: "Load back image"
+      has-back-toggle: "This document has a back side"
+      draw-hint: "Drag a rectangle on the image to add a field region."
+      regions-title: "Fields on this side"
+      no-regions: "No fields yet — drag on the image above to add one."
+      region-label: "Label"
+      region-id: "Field id"
+      region-type: "Type"
+      region-calendar: "Calendar"
+      type-text: "Text"
+      type-date: "Date"
+      type-photo: "Photo"
+      type-qr: "QR"
+      cal-gregorian: "Gregorian"
+      cal-buddhist: "Buddhist (+543)"
+      qr-parse-title: "QR payload parsing (optional)"
+      qr-parse-hint: "If this side's QR encodes structured data, set the delimiter and key order. Calibrate against a real card — do not guess."
+      qr-delimiter: "Delimiter"
+      qr-keys: "Keys, in order (comma-separated)"
+      qr-key-link: "Linked QR key"
+      qr-key-none: "(not linked)"
+      expiry-title: "Expiry field"
+      expiry-hint: "Which date field drives the valid/expired banner?"
+      expiry-none: "(no expiry date)"
+      builder-export-title: "Export"
+      btn-export-yaml: "Download {slug}.yaml"
+      manifest-title: "Update manifest.json"
+      manifest-hint: "Static hosting can't list a folder, so the extractor reads templates/manifest.json. Add this template to it."
+      manifest-upload-label: "Upload your current manifest.json (optional — otherwise the fetched one is used)"
+      btn-export-manifest: "Download updated manifest.json"
+      manifest-snippet-note: "Add {file} to templates/manifest.json (and drop the .yaml into templates/)."
+      edit-side: "Editing: {side}"
+      front-word: "front"
+      back-word: "back"
+      del: "Delete"

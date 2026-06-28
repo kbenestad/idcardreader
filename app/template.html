@@ -1,0 +1,645 @@
+<!DOCTYPE html>
+<!--
+  ════════════════════════════════════════════════════════════════════════════
+  idcardreader — TEMPLATE BUILDER (setup-time tool).
+
+  One of two entry points sharing the basis chrome and assets/. This page
+  produces template files (templates/*.yaml + manifest.json) calibrating where
+  each field sits on a document. It produces NO records — index.html does that.
+
+  Chrome (toolbar/header/footer/theme/About) is the unchanged basis shell.
+  Capture / crop / rotate live in the shared assets/capture.js.
+  ════════════════════════════════════════════════════════════════════════════
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="format-detection" content="telephone=no">
+<title>ID Card Reader — Template Builder</title>
+
+<link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
+<link rel="manifest" href="assets/site.webmanifest">
+<meta name="theme-color" content="#2f6fed">
+
+<script>
+  (function(){var t=localStorage.getItem('kb-theme');if(t)document.documentElement.setAttribute('data-theme',t);})();
+</script>
+
+<!-- CDN libraries: pdf-lib + js-yaml (existing) and the extraction stack. -->
+<script src="https://unpkg.com/pdf-lib@1.17.1/dist/pdf-lib.min.js"></script>
+<script src="https://unpkg.com/js-yaml@4.1.0/dist/js-yaml.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/tesseract.js@7.0.0/dist/tesseract.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js"></script>
+<!-- PDF.js is an ES module → import it and expose the global capture.js waits for. -->
+<script type="module">
+  import * as pdfjsLib from 'https://cdn.jsdelivr.net/npm/pdfjs-dist@6.1.200/build/pdf.min.mjs';
+  pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@6.1.200/build/pdf.worker.min.mjs';
+  window.pdfjsLib = pdfjsLib;
+</script>
+
+<!-- Shared design + runtime (byte-identical bizdocs copies) + app-owned capture.js. -->
+<link rel="stylesheet" href="assets/style.css">
+<link rel="stylesheet" href="assets/ui.css">
+<script src="assets/app.js"></script>
+<script src="assets/capture.js"></script>
+
+<style>
+/* ── App-specific layout (shared look stays in assets/*.css) ───────────────── */
+.idc-drop {
+  border: 1px dashed var(--accent-border); border-radius: var(--radius);
+  background: var(--accent-soft); padding: 22px; text-align: center;
+  display: flex; flex-direction: column; gap: 10px; align-items: center;
+}
+.idc-drop.is-over { border-color: var(--accent); background: var(--surface-3); }
+.idc-drop .hint { color: var(--text-muted); font-size: var(--fs-small); }
+.idc-row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+
+/* Cropper (from capture.js attachCropRotate) */
+.idc-croptools { display: flex; gap: 8px; margin-bottom: 10px; }
+.idc-stage { position: relative; display: inline-block; max-width: 100%; line-height: 0;
+  background: var(--surface-3); border-radius: var(--radius-sm); touch-action: none; }
+.idc-stage__img { display: block; max-width: 100%; cursor: crosshair; }
+.idc-crop { position: absolute; border: 2px solid var(--accent);
+  box-shadow: 0 0 0 9999px rgba(20,24,30,.45); cursor: move; }
+.idc-crop__h { position: absolute; width: 12px; height: 12px; background: var(--accent);
+  border: 2px solid #fff; border-radius: 50%; }
+.idc-crop__h--nw { left: -7px; top: -7px; cursor: nwse-resize; }
+.idc-crop__h--ne { right: -7px; top: -7px; cursor: nesw-resize; }
+.idc-crop__h--sw { left: -7px; bottom: -7px; cursor: nesw-resize; }
+.idc-crop__h--se { right: -7px; bottom: -7px; cursor: nwse-resize; }
+
+/* PDF page picker */
+.idc-thumbs { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 8px; }
+.idc-thumb { border: 2px solid var(--border-strong); border-radius: var(--radius-sm);
+  padding: 4px; cursor: pointer; background: var(--surface); }
+.idc-thumb:hover { border-color: var(--accent); }
+.idc-thumb img { display: block; max-height: 150px; }
+.idc-thumb .n { text-align: center; font-size: var(--fs-small); color: var(--text-muted); }
+
+/* Region editor */
+.idc-regedit { position: relative; display: inline-block; max-width: 100%; line-height: 0;
+  border-radius: var(--radius-sm); overflow: hidden; touch-action: none; }
+.idc-regedit img { display: block; max-width: 100%; cursor: crosshair; user-select: none; }
+.idc-region { position: absolute; border: 2px solid var(--accent); background: rgba(47,111,237,.12);
+  cursor: pointer; }
+.idc-region.is-photo { border-color: var(--success); background: rgba(31,157,95,.12); }
+.idc-region.is-qr { border-color: var(--warning); background: rgba(201,133,31,.12); }
+.idc-region__tag { position: absolute; top: 0; left: 0; transform: translateY(-100%);
+  background: var(--accent); color: var(--on-accent); font-size: 11px; font-weight: 600;
+  padding: 1px 6px; border-radius: 4px 4px 0 0; white-space: nowrap; line-height: 1.5; }
+.idc-region.is-photo .idc-region__tag { background: var(--success); }
+.idc-region.is-qr .idc-region__tag { background: var(--warning); }
+
+.idc-reglist { display: flex; flex-direction: column; gap: 8px; margin-top: 14px; }
+.idc-regrow { display: grid; grid-template-columns: 1.4fr 1fr .9fr .9fr auto;
+  gap: 8px; align-items: end; padding: 10px; border: 1px solid var(--border);
+  border-radius: var(--radius-sm); background: var(--surface-2); }
+.idc-regrow .kb-field { gap: 3px; }
+@media (max-width: 720px){ .idc-regrow { grid-template-columns: 1fr 1fr; } }
+.idc-muted { color: var(--text-muted); font-size: var(--fs-small); }
+.idc-snippet { font-family: var(--font-mono); font-size: 12px; background: var(--surface-3);
+  border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 10px; white-space: pre-wrap;
+  word-break: break-all; margin-top: 8px; }
+</style>
+</head>
+<body>
+<div id="app"><p class="kb-loading">Loading configuration…</p></div>
+
+<script>
+(async function () {
+'use strict';
+
+let CFG;
+let lang = 'en';
+const S = (key, vars) => lookupString(CFG['ui-strings'], key, lang, CFG['default-code'], vars);
+
+function normaliseConfig() {
+  const loc = CFG && CFG.localisation;
+  if (!loc) return;
+  const { table, languages, defaultCode } = buildLangTable(loc);
+  CFG['default-code'] = defaultCode;
+  CFG.languages = CFG.languages || languages;
+  CFG['ui-strings'] = table;
+}
+function applyLang(lc) {
+  lang = lc;
+  const loc = CFG.localisation || {};
+  const a = (loc[lc] && loc[lc].about) || (loc[CFG['default-code']] && loc[CFG['default-code']].about) || {};
+  CFG['about-title'] = a.title || 'About';
+  CFG['about-content'] = a.content || '';
+  CFG['about-button'] = a.button || 'Close';
+}
+const showAboutModal = () => kbAbout({ title: CFG['about-title'], contentMD: CFG['about-content'], closeLabel: CFG['about-button'] });
+
+/* ── Chrome (unchanged basis shell) ──────────────────────────────────────── */
+function buildToolbar() {
+  const toolbar = el('div', { className: 'kb-toolbar' });
+  const langSel = el('select', { className: 'kb-select', 'aria-label': 'Language' });
+  (CFG.languages || []).forEach(l => {
+    const o = el('option', { value: l.code }, l.name || l.code);
+    if (l.code === lang) o.selected = true;
+    langSel.appendChild(o);
+  });
+  langSel.addEventListener('change', () => {
+    applyLang(langSel.value); localStorage.setItem('idc-lang', langSel.value); render();
+  });
+  const { seg, label } = makeSizeControl();
+  toolbar.append(langSel, el('div', { className: 'spacer' }), seg, label, makeThemeButton(), makeAboutButton(showAboutModal));
+  return toolbar;
+}
+function buildHeader() {
+  const header = el('header', { className: 'kb-header' });
+  const brand = el('div', { className: 'kb-brand' });
+  const tile = el('span', { className: 'logo' }); tile.innerHTML = KB_BRAND_SVG;
+  const org = el('span', { className: 'org' });
+  org.appendChild(document.createTextNode(CFG.organization || 'kbenestad/idcardreader'));
+  const small = el('small'); small.textContent = CFG.tagline || S('subtitle');
+  org.appendChild(small); brand.append(tile, org);
+  const title = el('div', { className: 'kb-doctitle' });
+  title.appendChild(el('h1', null, S('app-title-builder')));
+  header.append(brand, title);
+  return header;
+}
+function buildFooter() {
+  const sep = () => el('span', { className: 'sep' }, '·');
+  const footer = el('footer', { className: 'kb-footer' });
+  const mark = el('span', { className: 'kb-mark' }); mark.innerHTML = KB_FOOTER_MARK_SVG + 'kBenestad';
+  footer.append(mark,
+    sep(), el('span', null, '© 2026 Kristian Benestad'),
+    sep(), el('a', { href: 'index.html' }, S('app-title-extract')),
+    sep(), el('button', { type: 'button', onClick: showAboutModal }, CFG['about-title'] || 'About'));
+  return footer;
+}
+function field(label, input) {
+  const f = el('div', { className: 'kb-field' });
+  f.append(el('span', { className: 'kb-label' }, label), input);
+  return f;
+}
+const slugify = s => String(s || '').toLowerCase().trim()
+  .replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
+
+/* ── Builder state ───────────────────────────────────────────────────────── */
+let manifest = [];          // current manifest.json array (fetched, editable)
+let templateList = [];      // [{file, name, slug, data}]
+let tpl = null;             // the template object being built
+const sideCanvas = { front: null, back: null };   // finalized working images
+
+function emptyTemplate(name, slug) {
+  return { name, slug, 'expiry-field': null, front: { fields: [] }, back: undefined };
+}
+
+/* ── Render ──────────────────────────────────────────────────────────────── */
+function render() {
+  const app = document.getElementById('app');
+  app.innerHTML = '';
+  const wrap = el('div', { className: 'kb-wrap' });
+  wrap.append(buildToolbar(), buildHeader());
+  wrap.appendChild(el('p', { className: 'idc-muted', style: { marginBottom: '14px' } }, S('builder-intro')));
+  wrap.appendChild(buildPickerCard());
+  if (tpl) {
+    wrap.appendChild(buildSideCard('front'));
+    wrap.appendChild(buildBackToggleCard());
+    if (tpl.back) wrap.appendChild(buildSideCard('back'));
+    wrap.appendChild(buildExpiryCard());
+    wrap.appendChild(buildExportCard());
+  }
+  wrap.appendChild(buildFooter());
+  app.appendChild(wrap);
+  updateThemeIcon();
+}
+
+/* Pick existing / new template */
+function buildPickerCard() {
+  const card = el('div', { className: 'kb-card' });
+  card.appendChild(el('div', { className: 'kb-card__title' }, S('tpl-select-label')));
+
+  const sel = el('select', { className: 'kb-select' });
+  sel.appendChild(el('option', { value: '__new' }, S('tpl-new')));
+  templateList.forEach(t => sel.appendChild(el('option', { value: t.slug }, t.name || t.slug)));
+  sel.value = tpl && templateList.some(t => t.slug === tpl.slug) ? tpl.slug : '__new';
+
+  const newBox = el('div', { className: 'kb-grid cols-2', style: { marginTop: '12px' } });
+  const nameI = el('input', { className: 'kb-input', placeholder: S('tpl-new-name-ph'), value: tpl ? tpl.name || '' : '' });
+  const slugI = el('input', { className: 'kb-input', placeholder: S('tpl-new-slug-ph'), value: tpl ? tpl.slug || '' : '' });
+  nameI.addEventListener('input', () => {
+    if (!slugI.dataset.touched) slugI.value = slugify(nameI.value);
+    if (tpl) { tpl.name = nameI.value; tpl.slug = slugI.value; }
+    refreshCollision();
+  });
+  slugI.addEventListener('input', () => { slugI.dataset.touched = '1'; if (tpl) tpl.slug = slugify(slugI.value); refreshCollision(); });
+  newBox.append(field(S('tpl-new-name'), nameI), field(S('tpl-new-slug'), slugI));
+
+  const collision = el('div', { className: 'kb-note kb-note--warning', style: { display: 'none' } });
+  collision.innerHTML = '<span></span><div>' + S('tpl-slug-collision') + '</div>';
+  function refreshCollision() {
+    const exists = tpl && templateList.some(t => t.slug === tpl.slug);
+    collision.style.display = exists ? 'flex' : 'none';
+  }
+
+  sel.addEventListener('change', () => {
+    if (sel.value === '__new') { tpl = emptyTemplate('', ''); sideCanvas.front = sideCanvas.back = null; }
+    else {
+      const found = templateList.find(t => t.slug === sel.value);
+      tpl = JSON.parse(JSON.stringify(found.data));
+      sideCanvas.front = sideCanvas.back = null;
+    }
+    render();
+  });
+
+  card.append(sel, newBox, collision);
+  refreshCollision();
+  return card;
+}
+
+/* One side: capture → finalize → region editor */
+function buildSideCard(side) {
+  const card = el('div', { className: 'kb-card' });
+  card.appendChild(el('div', { className: 'kb-card__title' }, S(side === 'front' ? 'step-front' : 'step-back')));
+  const body = el('div');
+  card.appendChild(body);
+
+  if (!sideCanvas[side]) {
+    mountCapture(body, side, () => render());
+  } else {
+    mountRegionEditor(body, side);
+  }
+  return card;
+}
+
+/* Upload / page-pick / crop-rotate, then store finalized canvas for the side. */
+function mountCapture(host, side, onDone) {
+  host.innerHTML = '';
+  const drop = el('div', { className: 'idc-drop' });
+  drop.appendChild(el('div', { className: 'hint' }, S('capture-hint')));
+  const fileInput = el('input', { type: 'file', accept: 'image/*,application/pdf', style: { display: 'none' } });
+  const pick = el('button', { className: 'kb-btn kb-btn--primary', onClick: () => fileInput.click() }, S('btn-upload'));
+  drop.append(pick, fileInput);
+  host.appendChild(drop);
+  const work = el('div', { style: { marginTop: '12px' } });
+  host.appendChild(work);
+
+  ['dragover', 'dragleave', 'drop'].forEach(ev => drop.addEventListener(ev, e => {
+    e.preventDefault();
+    if (ev === 'dragover') drop.classList.add('is-over'); else drop.classList.remove('is-over');
+    if (ev === 'drop' && e.dataTransfer.files[0]) handleFile(e.dataTransfer.files[0]);
+  }));
+  fileInput.addEventListener('change', () => { if (fileInput.files[0]) handleFile(fileInput.files[0]); });
+
+  async function handleFile(file) {
+    work.innerHTML = '<p class="idc-muted">…</p>';
+    let cap;
+    try { cap = await captureToImage(file); }
+    catch (e) { work.innerHTML = ''; work.appendChild(noteErr(e.message)); return; }
+    if (cap.isPdf && cap.pageCount > 1) {
+      showPagePicker(cap);
+    } else {
+      showCropper(cap.canvas);
+    }
+  }
+  function showPagePicker(cap) {
+    work.innerHTML = '';
+    work.appendChild(el('p', { className: 'idc-muted' }, S('pick-page')));
+    const thumbs = el('div', { className: 'idc-thumbs' });
+    cap.thumbnails.forEach(t => {
+      const cell = el('div', { className: 'idc-thumb', onClick: async () => {
+        work.innerHTML = '<p class="idc-muted">…</p>';
+        showCropper(await cap.pickPage(t.page));
+      } });
+      const im = el('img', { src: t.dataUrl });
+      cell.append(im, el('div', { className: 'n' }, String(t.page)));
+      thumbs.appendChild(cell);
+    });
+    work.appendChild(thumbs);
+  }
+  function showCropper(canvas) {
+    work.innerHTML = '';
+    const cropHost = el('div');
+    work.appendChild(cropHost);
+    const ctl = attachCropRotate(canvas, cropHost);
+    const bar = el('div', { className: 'kb-actbar', style: { marginTop: '12px' } });
+    bar.append(
+      el('button', { className: 'kb-btn kb-btn--primary', onClick: () => {
+        sideCanvas[side] = ctl.getResult(); ctl.destroy(); onDone();
+      } }, S('use-this-image')),
+      el('button', { className: 'kb-btn kb-btn--ghost', onClick: () => { ctl.destroy(); mountCapture(host, side, onDone); } }, S('recapture'))
+    );
+    work.appendChild(bar);
+  }
+}
+
+/* Draw / edit field regions on a finalized side image. */
+function mountRegionEditor(host, side) {
+  host.innerHTML = '';
+  ensureSideObj(side);
+  const sideObj = tpl[side];
+
+  const replaceBtn = el('button', { className: 'kb-btn kb-btn--ghost kb-btn--sm', onClick: () => {
+    sideCanvas[side] = null; render();
+  } }, S('recapture'));
+  host.appendChild(el('div', { className: 'kb-actbar', style: { marginBottom: '10px' } }, replaceBtn));
+  host.appendChild(el('p', { className: 'idc-muted' }, S('draw-hint')));
+
+  const editor = el('div', { className: 'idc-regedit' });
+  const img = el('img', { src: canvasToDataURL(sideCanvas[side], 'image/jpeg', 0.85), draggable: 'false' });
+  editor.appendChild(img);
+  host.appendChild(editor);
+
+  // draw-to-create overlay
+  let draft = null, draftEl = null;
+  editor.addEventListener('pointerdown', e => {
+    if (e.target !== img) return;   // clicks on existing boxes are handled by them
+    const r = editor.getBoundingClientRect();
+    draft = { x: e.clientX - r.left, y: e.clientY - r.top };
+    draftEl = el('div', { className: 'idc-region' });
+    editor.appendChild(draftEl);
+    editor.setPointerCapture(e.pointerId);
+  });
+  editor.addEventListener('pointermove', e => {
+    if (!draft) return;
+    const r = editor.getBoundingClientRect();
+    const x2 = e.clientX - r.left, y2 = e.clientY - r.top;
+    const x = Math.min(draft.x, x2), y = Math.min(draft.y, y2);
+    const w = Math.abs(x2 - draft.x), h = Math.abs(y2 - draft.y);
+    Object.assign(draftEl.style, { left: x + 'px', top: y + 'px', width: w + 'px', height: h + 'px' });
+    draft.rect = { x, y, w, h };
+  });
+  editor.addEventListener('pointerup', () => {
+    if (!draft) return;
+    const rect = draft.rect; draftEl.remove(); draft = null; draftEl = null;
+    if (!rect || rect.w < 8 || rect.h < 8) { drawRegions(); return; }
+    const W = editor.clientWidth, H = editor.clientHeight;
+    const regionPct = { x: rect.x / W * 100, y: rect.y / H * 100, w: rect.w / W * 100, h: rect.h / H * 100 };
+    const f = { id: '', label: '', type: 'text', region: round1(regionPct) };
+    sideObj.fields.push(f);
+    drawRegions(); renderRegionList();
+  });
+
+  const listHost = el('div', { className: 'idc-reglist' });
+  const qrHost = el('div');
+  host.append(listHost, qrHost);
+
+  function drawRegions() {
+    [...editor.querySelectorAll('.idc-region')].forEach(n => n.remove());
+    const W = editor.clientWidth, H = editor.clientHeight;
+    sideObj.fields.forEach((f, i) => {
+      const b = el('div', { className: 'idc-region' + (f.type === 'photo' ? ' is-photo' : f.type === 'qr' ? ' is-qr' : '') });
+      Object.assign(b.style, {
+        left: f.region.x / 100 * W + 'px', top: f.region.y / 100 * H + 'px',
+        width: f.region.w / 100 * W + 'px', height: f.region.h / 100 * H + 'px',
+      });
+      b.appendChild(el('div', { className: 'idc-region__tag' }, f.label || f.id || ('#' + (i + 1))));
+      b.addEventListener('click', () => { const row = document.getElementById('regrow-' + side + '-' + i); if (row) row.scrollIntoView({ block: 'center' }); });
+      editor.appendChild(b);
+    });
+  }
+  function renderRegionList() {
+    listHost.innerHTML = '';
+    if (!sideObj.fields.length) { listHost.appendChild(el('p', { className: 'idc-muted' }, S('no-regions'))); return; }
+    sideObj.fields.forEach((f, i) => listHost.appendChild(regionRow(f, i)));
+    renderQrParse();
+  }
+  function regionRow(f, i) {
+    const row = el('div', { className: 'idc-regrow', id: 'regrow-' + side + '-' + i });
+    const labelI = el('input', { className: 'kb-input', value: f.label || '' });
+    labelI.addEventListener('input', () => {
+      f.label = labelI.value;
+      if (!idI.dataset.touched) { f.id = slugify(labelI.value); idI.value = f.id; }
+      drawRegions();
+    });
+    const idI = el('input', { className: 'kb-input', value: f.id || '' });
+    idI.addEventListener('input', () => { idI.dataset.touched = '1'; f.id = slugify(idI.value); });
+
+    const typeSel = el('select', { className: 'kb-select' });
+    [['text', 'type-text'], ['date', 'type-date'], ['photo', 'type-photo'], ['qr', 'type-qr']]
+      .forEach(([v, k]) => { const o = el('option', { value: v }, S(k)); if (f.type === v) o.selected = true; typeSel.appendChild(o); });
+    typeSel.addEventListener('change', () => { f.type = typeSel.value; renderRegionList(); drawRegions(); });
+
+    const calWrap = el('div', { className: 'kb-field' });
+    if (f.type === 'date') {
+      const calSel = el('select', { className: 'kb-select' });
+      [['gregorian', 'cal-gregorian'], ['buddhist', 'cal-buddhist']]
+        .forEach(([v, k]) => { const o = el('option', { value: v }, S(k)); if ((f.calendar || 'gregorian') === v) o.selected = true; calSel.appendChild(o); });
+      calSel.addEventListener('change', () => { f.calendar = calSel.value; });
+      calWrap.append(el('span', { className: 'kb-label' }, S('region-calendar')), calSel);
+    }
+
+    const del = el('button', { className: 'kb-btn kb-btn--danger kb-btn--sm', onClick: () => {
+      sideObj.fields.splice(i, 1); drawRegions(); renderRegionList();
+    } }, S('del'));
+
+    row.append(
+      field(S('region-label'), labelI), field(S('region-id'), idI),
+      field(S('region-type'), typeSel), calWrap,
+      el('div', { className: 'kb-field' }, [el('span', { className: 'kb-label' }, ' '), del])
+    );
+    return row;
+  }
+  function renderQrParse() {
+    qrHost.innerHTML = '';
+    const hasQr = sideObj.fields.some(f => f.type === 'qr');
+    if (!hasQr) { delete sideObj['qr-parse']; return; }
+    const card = el('div', { style: { marginTop: '16px', paddingTop: '14px', borderTop: '1px solid var(--border)' } });
+    card.appendChild(el('div', { className: 'kb-label' }, S('qr-parse-title')));
+    card.appendChild(el('p', { className: 'idc-muted', style: { margin: '4px 0 10px' } }, S('qr-parse-hint')));
+    const qp = sideObj['qr-parse'] || { delimiter: '|', keys: [] };
+    const grid = el('div', { className: 'kb-grid cols-2' });
+    const delimI = el('input', { className: 'kb-input', value: qp.delimiter ?? '|' });
+    const keysI = el('input', { className: 'kb-input', value: (qp.keys || []).join(', '), placeholder: 'id-number, name-th, …' });
+    const sync = () => {
+      const keys = keysI.value.split(',').map(s => s.trim()).filter(Boolean);
+      if (delimI.value === '' && !keys.length) delete sideObj['qr-parse'];
+      else sideObj['qr-parse'] = { delimiter: delimI.value, keys };
+      renderQrKeyLinks();
+    };
+    delimI.addEventListener('input', sync); keysI.addEventListener('input', sync);
+    grid.append(field(S('qr-delimiter'), delimI), field(S('qr-keys'), keysI));
+    card.appendChild(grid);
+    const linkHost = el('div', { style: { marginTop: '10px' } });
+    card.appendChild(linkHost);
+    qrHost.appendChild(card);
+
+    function renderQrKeyLinks() {
+      linkHost.innerHTML = '';
+      const keys = (sideObj['qr-parse'] && sideObj['qr-parse'].keys) || [];
+      if (!keys.length) return;
+      const textFields = sideObj.fields.filter(f => f.type === 'text');
+      if (!textFields.length) return;
+      linkHost.appendChild(el('div', { className: 'kb-label', style: { marginBottom: '6px' } }, S('qr-key-link')));
+      textFields.forEach(f => {
+        const sel = el('select', { className: 'kb-select' });
+        sel.appendChild(el('option', { value: '' }, S('qr-key-none')));
+        keys.forEach(k => { const o = el('option', { value: k }, k); if (f['qr-key'] === k) o.selected = true; sel.appendChild(o); });
+        sel.addEventListener('change', () => { if (sel.value) f['qr-key'] = sel.value; else delete f['qr-key']; });
+        const row = el('div', { className: 'kb-field', style: { marginBottom: '8px' } });
+        row.append(el('span', { className: 'kb-label' }, f.label || f.id), sel);
+        linkHost.appendChild(row);
+      });
+    }
+    renderQrKeyLinks();
+  }
+
+  drawRegions();
+  renderRegionList();
+  window.addEventListener('resize', () => drawRegions(), { once: false });
+}
+
+function ensureSideObj(side) {
+  if (!tpl[side]) tpl[side] = { fields: [] };
+  if (!tpl[side].fields) tpl[side].fields = [];
+}
+
+/* Back-side toggle */
+function buildBackToggleCard() {
+  const card = el('div', { className: 'kb-card' });
+  const has = !!tpl.back;
+  const cb = el('input', { type: 'checkbox' });
+  cb.checked = has;
+  cb.addEventListener('change', () => {
+    if (cb.checked) { tpl.back = tpl.back || { fields: [] }; }
+    else { delete tpl.back; sideCanvas.back = null;
+      if (tpl['expiry-field'] && tpl['expiry-field'].side === 'back') tpl['expiry-field'] = null; }
+    render();
+  });
+  const lab = el('label', { style: { display: 'flex', gap: '8px', alignItems: 'center', cursor: 'pointer' } });
+  lab.append(cb, el('span', null, S('has-back-toggle')));
+  card.appendChild(lab);
+  return card;
+}
+
+/* Expiry field selector */
+function buildExpiryCard() {
+  const card = el('div', { className: 'kb-card' });
+  card.appendChild(el('div', { className: 'kb-card__title' }, S('expiry-title')));
+  card.appendChild(el('p', { className: 'idc-muted', style: { marginBottom: '10px' } }, S('expiry-hint')));
+  const sel = el('select', { className: 'kb-select' });
+  sel.appendChild(el('option', { value: '' }, S('expiry-none')));
+  ['front', 'back'].forEach(side => {
+    if (!tpl[side]) return;
+    tpl[side].fields.filter(f => f.type === 'date').forEach(f => {
+      const val = side + ':' + f.id;
+      const o = el('option', { value: val }, (side === 'front' ? S('front-word') : S('back-word')) + ' · ' + (f.label || f.id));
+      const ef = tpl['expiry-field'];
+      if (ef && ef.side === side && ef.id === f.id) o.selected = true;
+      sel.appendChild(o);
+    });
+  });
+  sel.addEventListener('change', () => {
+    if (!sel.value) tpl['expiry-field'] = null;
+    else { const [side, id] = sel.value.split(':'); tpl['expiry-field'] = { side, id }; }
+  });
+  card.appendChild(sel);
+  return card;
+}
+
+/* Export YAML + manifest */
+function buildExportCard() {
+  const card = el('div', { className: 'kb-card' });
+  card.appendChild(el('div', { className: 'kb-card__title' }, S('builder-export-title')));
+
+  if (!tpl.slug) { card.appendChild(el('p', { className: 'idc-muted' }, S('tpl-new-slug'))); return card; }
+
+  const yamlBtn = el('button', { className: 'kb-btn kb-btn--primary', onClick: exportYaml }, S('btn-export-yaml', { slug: tpl.slug }));
+  card.appendChild(el('div', { className: 'kb-actbar' }, yamlBtn));
+
+  // manifest section
+  card.appendChild(el('div', { className: 'kb-card__title', style: { marginTop: '20px' } }, S('manifest-title')));
+  card.appendChild(el('p', { className: 'idc-muted', style: { marginBottom: '10px' } }, S('manifest-hint')));
+
+  const upLabel = el('div', { className: 'kb-label', style: { marginBottom: '6px' } }, S('manifest-upload-label'));
+  const upInput = el('input', { type: 'file', accept: '.json,application/json', className: 'kb-input' });
+  let uploaded = null;
+  upInput.addEventListener('change', async () => {
+    if (!upInput.files[0]) return;
+    try { uploaded = JSON.parse(await upInput.files[0].text()); }
+    catch (e) { kbAlert({ title: 'Error', message: 'Invalid JSON: ' + e.message }); }
+  });
+  card.append(upLabel, upInput);
+
+  const file = tpl.slug + '.yaml';
+  card.appendChild(el('div', { className: 'kb-actbar', style: { marginTop: '12px' } },
+    el('button', { className: 'kb-btn kb-btn--ghost', onClick: () => {
+      const base = Array.isArray(uploaded) ? uploaded : manifest;
+      const next = Array.from(new Set([...base, file]));
+      downloadBlob(JSON.stringify(next, null, 2) + '\n', 'manifest.json', 'application/json');
+    } }, S('btn-export-manifest'))));
+
+  card.appendChild(el('div', { className: 'idc-snippet' }, S('manifest-snippet-note', { file })));
+  return card;
+}
+
+function buildTemplateObject() {
+  // Emit a clean object in a stable key order.
+  const clean = { name: tpl.name || tpl.slug, slug: tpl.slug };
+  if (tpl['expiry-field']) clean['expiry-field'] = tpl['expiry-field'];
+  const side = (s) => {
+    const o = {};
+    if (s['qr-parse']) o['qr-parse'] = s['qr-parse'];
+    o.fields = (s.fields || []).map(f => {
+      const ff = { id: f.id, label: f.label, type: f.type, region: round1(f.region) };
+      if (f.type === 'date') ff.calendar = f.calendar || 'gregorian';
+      if (f['qr-key']) ff['qr-key'] = f['qr-key'];
+      return ff;
+    });
+    return o;
+  };
+  clean.front = side(tpl.front || { fields: [] });
+  if (tpl.back) clean.back = side(tpl.back);
+  return clean;
+}
+function exportYaml() {
+  if (!tpl.slug) { kbAlert({ title: 'Slug', message: S('tpl-new-slug') }); return; }
+  const yaml = jsyaml.dump(buildTemplateObject(), { lineWidth: 120, noRefs: true });
+  downloadBlob(yaml, tpl.slug + '.yaml', 'text/yaml');
+}
+
+/* ── helpers ─────────────────────────────────────────────────────────────── */
+const round1 = r => ({ x: Math.round(r.x * 10) / 10, y: Math.round(r.y * 10) / 10, w: Math.round(r.w * 10) / 10, h: Math.round(r.h * 10) / 10 });
+function noteErr(msg) {
+  const n = el('div', { className: 'kb-note kb-note--error' });
+  n.innerHTML = '<span>⚠</span><div>' + msg + '</div>';
+  return n;
+}
+function downloadBlob(content, filename, type) {
+  const url = URL.createObjectURL(new Blob([content], { type }));
+  const a = el('a', { href: url, download: filename }); document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+/* Load existing templates from the manifest for the picker. */
+async function loadTemplates() {
+  try {
+    const res = await fetch('templates/manifest.json');
+    manifest = res.ok ? await res.json() : [];
+  } catch (e) { manifest = []; }
+  templateList = [];
+  for (const file of manifest) {
+    try {
+      const r = await fetch('templates/' + file);
+      if (!r.ok) continue;
+      const data = jsyaml.load(await r.text());
+      templateList.push({ file, name: data.name, slug: data.slug || file.replace(/\.ya?ml$/, ''), data });
+    } catch (e) { /* skip unreadable template */ }
+  }
+}
+
+/* ── Boot ────────────────────────────────────────────────────────────────── */
+try {
+  CFG = await loadYamlConfig();
+  normaliseConfig();
+  applyAccent(CFG);
+  initFontScale();
+  lang = localStorage.getItem('idc-lang') || CFG['default-code'] || 'en';
+  applyLang(lang);
+  await loadTemplates();
+  tpl = emptyTemplate('', '');
+  render();
+} catch (e) {
+  document.getElementById('app').innerHTML =
+    `<div class="kb-wrap"><div class="kb-note kb-note--error"><span>⚠</span>` +
+    `<div><b>Failed to load config.yml</b><br>${e.message}</div></div></div>`;
+}
+})();
+</script>
+</body>
+</html>
