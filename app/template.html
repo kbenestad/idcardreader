@@ -75,8 +75,10 @@
 .idc-stage { overflow: visible; }
 .idc-align-guide { position: absolute; border: 2px dashed var(--warning); background: rgba(201,133,31,.10);
   pointer-events: none; box-sizing: border-box; }
+.idc-align-guide--2 { border-color: var(--info); background: rgba(47,111,237,.10); }
 .idc-align-guide__tag { position: absolute; top: 2px; left: 2px; font-size: 10px; line-height: 1.5;
   background: rgba(160,95,0,.82); color: #fff; padding: 1px 5px; border-radius: 3px; white-space: nowrap; }
+.idc-align-guide--2 .idc-align-guide__tag { background: rgba(30,75,180,.82); }
 
 /* PDF page picker */
 .idc-thumbs { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 8px; }
@@ -223,6 +225,7 @@ function render() {
   wrap.appendChild(buildPickerCard());
   if (tpl) {
     wrap.appendChild(buildAspectCard());
+    wrap.appendChild(buildOcrLanguageCard());
     wrap.appendChild(buildSideCard('front'));
     wrap.appendChild(buildBackToggleCard());
     if (tpl.back) wrap.appendChild(buildSideCard('back'));
@@ -293,6 +296,19 @@ function buildAspectCard() {
     tpl.aspect = sel.value; sideCanvas.front = sideCanvas.back = null; render();
   });
   card.appendChild(sel);
+  return card;
+}
+
+function buildOcrLanguageCard() {
+  const card = el('div', { className: 'kb-card' });
+  card.appendChild(el('div', { className: 'kb-card__title' }, S('ocr-language-title')));
+  card.appendChild(el('p', { className: 'idc-muted', style: { marginBottom: '10px' } }, S('ocr-language-hint')));
+  const inp = el('input', { className: 'kb-input', placeholder: S('ocr-language-placeholder'), value: tpl['ocr-language'] || '' });
+  inp.addEventListener('input', () => {
+    const v = inp.value.trim();
+    if (v) tpl['ocr-language'] = v; else delete tpl['ocr-language'];
+  });
+  card.appendChild(inp);
   return card;
 }
 
@@ -591,8 +607,21 @@ function buildExpiryCard() {
   return card;
 }
 
-function populateAlignmentOptions(sel) {
-  const af = tpl['alignment-field'];
+function getAlignmentFields() {
+  // Support new array format and legacy single-object format.
+  return tpl['alignment-fields'] || (tpl['alignment-field'] ? [tpl['alignment-field'], null] : [null, null]);
+}
+function setAlignmentField(idx, value) {
+  const afs = getAlignmentFields().slice(0, 2);
+  while (afs.length < 2) afs.push(null);
+  if (!value) afs[idx] = null;
+  else { const [side, id] = value.split(':'); afs[idx] = { side, id }; }
+  tpl['alignment-fields'] = afs;
+  delete tpl['alignment-field'];
+}
+function populateAlignmentOptions(sel, idx) {
+  const afs = getAlignmentFields();
+  const af = afs[idx] || null;
   let afStillValid = false;
   sel.innerHTML = '';
   sel.appendChild(el('option', { value: '' }, S('alignment-none')));
@@ -605,23 +634,26 @@ function populateAlignmentOptions(sel) {
       sel.appendChild(o);
     });
   });
-  if (af && !afStillValid) tpl['alignment-field'] = null;
+  if (af && !afStillValid) setAlignmentField(idx, '');
 }
 function syncAlignment() {
-  const sel = document.getElementById('idc-alignment-sel');
-  if (sel) populateAlignmentOptions(sel);
+  [0, 1].forEach(idx => {
+    const sel = document.getElementById('idc-alignment-sel-' + idx);
+    if (sel) populateAlignmentOptions(sel, idx);
+  });
 }
 function buildAlignmentCard() {
   const card = el('div', { className: 'kb-card' });
   card.appendChild(el('div', { className: 'kb-card__title' }, S('alignment-title')));
   card.appendChild(el('p', { className: 'idc-muted', style: { marginBottom: '10px' } }, S('alignment-hint')));
-  const sel = el('select', { className: 'kb-select', id: 'idc-alignment-sel' });
-  populateAlignmentOptions(sel);
-  sel.addEventListener('change', () => {
-    if (!sel.value) tpl['alignment-field'] = null;
-    else { const [side, id] = sel.value.split(':'); tpl['alignment-field'] = { side, id }; }
+  const grid = el('div', { className: 'kb-grid cols-2' });
+  [0, 1].forEach(idx => {
+    const sel = el('select', { className: 'kb-select', id: 'idc-alignment-sel-' + idx });
+    populateAlignmentOptions(sel, idx);
+    sel.addEventListener('change', () => setAlignmentField(idx, sel.value));
+    grid.appendChild(field(S(idx === 0 ? 'alignment-guide-1' : 'alignment-guide-2'), sel));
   });
-  card.appendChild(sel);
+  card.appendChild(grid);
   return card;
 }
 
@@ -665,7 +697,9 @@ function buildTemplateObject() {
   // Emit a clean object in a stable key order.
   const clean = { name: tpl.name || tpl.slug, slug: tpl.slug, aspect: tpl.aspect || 'id-card' };
   if (tpl['expiry-field']) clean['expiry-field'] = tpl['expiry-field'];
-  if (tpl['alignment-field']) clean['alignment-field'] = tpl['alignment-field'];
+  const afs = getAlignmentFields().filter(Boolean);
+  if (afs.length) clean['alignment-fields'] = afs;
+  if (tpl['ocr-language']) clean['ocr-language'] = tpl['ocr-language'];
   const side = (s) => {
     const o = {};
     if (s['qr-parse']) o['qr-parse'] = s['qr-parse'];

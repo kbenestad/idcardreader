@@ -79,8 +79,10 @@
 .idc-stage { overflow: visible; }
 .idc-align-guide { position: absolute; border: 2px dashed var(--warning); background: rgba(201,133,31,.10);
   pointer-events: none; box-sizing: border-box; }
+.idc-align-guide--2 { border-color: var(--info); background: rgba(47,111,237,.10); }
 .idc-align-guide__tag { position: absolute; top: 2px; left: 2px; font-size: 10px; line-height: 1.5;
   background: rgba(160,95,0,.82); color: #fff; padding: 1px 5px; border-radius: 3px; white-space: nowrap; }
+.idc-align-guide--2 .idc-align-guide__tag { background: rgba(30,75,180,.82); }
 
 .idc-thumbs { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 8px; }
 .idc-thumb { border: 2px solid var(--border-strong); border-radius: var(--radius-sm);
@@ -98,7 +100,8 @@
 @media (max-width: 640px){ .idc-fieldrow { grid-template-columns: 1fr; } }
 .idc-regimg { width: 120px; max-height: 80px; object-fit: contain; border: 1px solid var(--border);
   border-radius: 4px; background: var(--surface-3); }
-.idc-photoimg { max-width: 120px; max-height: 150px; border-radius: 4px; border: 1px solid var(--border); }
+.idc-photoimg { width: 100%; max-height: 360px; object-fit: contain; border-radius: 4px; border: 1px solid var(--border); background: var(--surface-3); }
+.idc-fieldrow.idc-photorow { grid-template-columns: minmax(180px, 35%) 1fr auto; }
 .idc-lightbox { position: fixed; inset: 0; background: rgba(10,12,16,.82); z-index: 10000;
   display: flex; align-items: center; justify-content: center; padding: 24px; cursor: zoom-out; }
 .idc-lightbox img { max-width: 96vw; max-height: 92vh; border-radius: 6px; box-shadow: 0 10px 40px rgba(0,0,0,.5); }
@@ -330,14 +333,14 @@ function mountCapture(host, side, onDone) {
   function showCropper(canvas) {
     work.innerHTML = '';
     const cropHost = el('div'); work.appendChild(cropHost);
-    let alignmentRegion = null;
-    const af = tpl['alignment-field'];
-    if (af && af.side === side) {
+    // Support new array format (alignment-fields) and legacy single-object format (alignment-field).
+    const afList = tpl['alignment-fields'] || (tpl['alignment-field'] ? [tpl['alignment-field']] : []);
+    const alignmentRegions = afList.filter(af => af && af.side === side).map(af => {
       const sideObj = tpl[side];
       const afField = sideObj && (sideObj.fields || []).find(f => f.id === af.id);
-      if (afField) alignmentRegion = Object.assign({}, afField.region, { label: afField.label || afField.id });
-    }
-    const ctl = attachCropRotate(canvas, cropHost, { aspect: aspectRatioFor(tpl.aspect), allowOverflow: true, alignmentRegion });
+      return afField ? Object.assign({}, afField.region, { label: afField.label || afField.id }) : null;
+    }).filter(Boolean);
+    const ctl = attachCropRotate(canvas, cropHost, { aspect: aspectRatioFor(tpl.aspect), allowOverflow: true, alignmentRegions });
     work.appendChild(el('div', { className: 'kb-actbar', style: { marginTop: '12px' } },
       el('button', { className: 'kb-btn kb-btn--primary', onClick: () => { sideCanvas[side] = ctl.getResult(); ctl.destroy(); onDone(); } }, S('use-this-image'))));
   }
@@ -346,7 +349,7 @@ function mountCapture(host, side, onDone) {
 /* ── Extraction ──────────────────────────────────────────────────────────── */
 async function runExtraction() {
   busy = true; render();
-  const ocrLang = CFG['ocr-language'] || 'eng';
+  const ocrLang = tpl['ocr-language'] || CFG['ocr-language'] || 'eng';
   const out = [];
   for (const side of ['front', 'back']) {
     if (!tpl[side] || !sideCanvas[side]) continue;
@@ -365,8 +368,8 @@ async function runExtraction() {
       const r = {
         id: f.id, label: f.label || f.id, type: f.type, side, calendar: f.calendar || 'gregorian',
         regionDataUrl: crop.toDataURL('image/jpeg', 0.8),
-        ocrValue: '', qrValue: '', value: '', conflict: false, resolved: true, reviewed: true,
-        photoDataUrl: null,
+        ocrValue: '', qrValue: '', value: '', dateText: '',
+        conflict: false, resolved: true, reviewed: true, photoDataUrl: null,
       };
       if (f.type === 'photo') {
         r.photoDataUrl = crop.toDataURL('image/jpeg', 0.85);
@@ -375,7 +378,13 @@ async function runExtraction() {
         r.value = rawQr[side] || '';
       } else {
         r.ocrValue = await ocrField(crop, ocrLang);
-        r.value = r.ocrValue;
+        if (f.type === 'date' && r.ocrValue) {
+          // Keep raw OCR text for display; store the interpreted ISO date as value.
+          r.dateText = r.ocrValue;
+          r.value = normaliseDate(r.ocrValue, r.calendar) || r.ocrValue;
+        } else {
+          r.value = r.ocrValue;
+        }
         if (f['qr-key'] && payload && payload[f['qr-key']] != null) {
           r.qrValue = payload[f['qr-key']];
           if (r.qrValue && conflictBetween(r.ocrValue, r.qrValue, r.type, r.calendar)) {
@@ -444,7 +453,8 @@ function buildReviewCard() {
 }
 
 function reviewRow(r, i) {
-  const row = el('div', { className: 'idc-fieldrow' + (r.conflict && !r.resolved ? ' is-conflict' : '') });
+  const isPhoto = r.type === 'photo';
+  const row = el('div', { className: 'idc-fieldrow' + (isPhoto ? ' idc-photorow' : '') + (r.conflict && !r.resolved ? ' is-conflict' : '') });
 
   // col 1: region / photo preview (click to zoom)
   const imgCol = el('div');
@@ -473,6 +483,11 @@ function reviewRow(r, i) {
     input.addEventListener('input', () => { if (input.value.trim()) resolveField(i, input.value, true); });
     mid.appendChild(input);
   } else {
+    // For date fields show the raw extracted text above the editable interpreted date.
+    if (r.type === 'date' && r.dateText && r.dateText !== r.value) {
+      mid.appendChild(el('div', { className: 'idc-muted', style: { fontSize: 'var(--fs-small)', marginBottom: '3px' } },
+        S('date-extracted') + ': ' + r.dateText));
+    }
     const input = el('input', { className: 'kb-input', value: r.value || '' });
     input.addEventListener('input', () => { r.value = input.value; });
     mid.appendChild(input);
