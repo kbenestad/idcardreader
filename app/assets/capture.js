@@ -140,6 +140,7 @@ function attachCropRotate(sourceCanvas, host, opts = {}) {
 
   const aspect = opts.aspect && opts.aspect > 0 ? opts.aspect : null;   // w/h, or null
   const allowOverflow = !!opts.allowOverflow;
+  const alignmentRegion = opts.alignmentRegion || null;  // {x,y,w,h} % + optional label
   let rotation = 0;                 // degrees, multiples of 90
   // crop rectangle in *display* pixels, relative to the shown image
   let crop = null;
@@ -158,6 +159,21 @@ function attachCropRotate(sourceCanvas, host, opts = {}) {
     h.dataset.handle = pos;
     box.appendChild(h);
   });
+  if (alignmentRegion) {
+    const guide = document.createElement('div');
+    guide.className = 'idc-align-guide';
+    Object.assign(guide.style, {
+      left: alignmentRegion.x + '%', top: alignmentRegion.y + '%',
+      width: alignmentRegion.w + '%', height: alignmentRegion.h + '%',
+    });
+    if (alignmentRegion.label) {
+      const tag = document.createElement('div');
+      tag.className = 'idc-align-guide__tag';
+      tag.textContent = alignmentRegion.label;
+      guide.appendChild(tag);
+    }
+    box.appendChild(guide);
+  }
   stage.append(imgCanvas, box);
 
   const tools = document.createElement('div');

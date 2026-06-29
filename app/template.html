@@ -73,6 +73,10 @@
 .idc-crop__h--w { left: -7px; top: 50%; transform: translateY(-50%); cursor: ew-resize; }
 .idc-crop__h--e { right: -7px; top: 50%; transform: translateY(-50%); cursor: ew-resize; }
 .idc-stage { overflow: visible; }
+.idc-align-guide { position: absolute; border: 2px dashed var(--warning); background: rgba(201,133,31,.10);
+  pointer-events: none; box-sizing: border-box; }
+.idc-align-guide__tag { position: absolute; top: 2px; left: 2px; font-size: 10px; line-height: 1.5;
+  background: rgba(160,95,0,.82); color: #fff; padding: 1px 5px; border-radius: 3px; white-space: nowrap; }
 
 /* PDF page picker */
 .idc-thumbs { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 8px; }
@@ -223,6 +227,7 @@ function render() {
     wrap.appendChild(buildBackToggleCard());
     if (tpl.back) wrap.appendChild(buildSideCard('back'));
     wrap.appendChild(buildExpiryCard());
+    wrap.appendChild(buildAlignmentCard());
     wrap.appendChild(buildExportCard());
   }
   wrap.appendChild(buildFooter());
@@ -437,7 +442,8 @@ function mountRegionEditor(host, side) {
     if (!sideObj.fields.length) { listHost.appendChild(el('p', { className: 'idc-muted' }, S('no-regions'))); return; }
     sideObj.fields.forEach((f, i) => listHost.appendChild(regionRow(f, i)));
     renderQrParse();
-    syncExpiry();   // date fields may have been added/removed/retyped
+    syncExpiry();      // date fields may have been added/removed/retyped
+    syncAlignment();   // any field may be the alignment guide
   }
   function regionRow(f, i) {
     const row = el('div', { className: 'idc-regrow', id: 'regrow-' + side + '-' + i });
@@ -585,6 +591,40 @@ function buildExpiryCard() {
   return card;
 }
 
+function populateAlignmentOptions(sel) {
+  const af = tpl['alignment-field'];
+  let afStillValid = false;
+  sel.innerHTML = '';
+  sel.appendChild(el('option', { value: '' }, S('alignment-none')));
+  ['front', 'back'].forEach(side => {
+    if (!tpl[side]) return;
+    (tpl[side].fields || []).filter(f => f.id).forEach(f => {
+      const val = side + ':' + f.id;
+      const o = el('option', { value: val }, (side === 'front' ? S('front-word') : S('back-word')) + ' · ' + (f.label || f.id));
+      if (af && af.side === side && af.id === f.id) { o.selected = true; afStillValid = true; }
+      sel.appendChild(o);
+    });
+  });
+  if (af && !afStillValid) tpl['alignment-field'] = null;
+}
+function syncAlignment() {
+  const sel = document.getElementById('idc-alignment-sel');
+  if (sel) populateAlignmentOptions(sel);
+}
+function buildAlignmentCard() {
+  const card = el('div', { className: 'kb-card' });
+  card.appendChild(el('div', { className: 'kb-card__title' }, S('alignment-title')));
+  card.appendChild(el('p', { className: 'idc-muted', style: { marginBottom: '10px' } }, S('alignment-hint')));
+  const sel = el('select', { className: 'kb-select', id: 'idc-alignment-sel' });
+  populateAlignmentOptions(sel);
+  sel.addEventListener('change', () => {
+    if (!sel.value) tpl['alignment-field'] = null;
+    else { const [side, id] = sel.value.split(':'); tpl['alignment-field'] = { side, id }; }
+  });
+  card.appendChild(sel);
+  return card;
+}
+
 /* Export YAML + manifest */
 function buildExportCard() {
   const card = el('div', { className: 'kb-card' });
@@ -625,6 +665,7 @@ function buildTemplateObject() {
   // Emit a clean object in a stable key order.
   const clean = { name: tpl.name || tpl.slug, slug: tpl.slug, aspect: tpl.aspect || 'id-card' };
   if (tpl['expiry-field']) clean['expiry-field'] = tpl['expiry-field'];
+  if (tpl['alignment-field']) clean['alignment-field'] = tpl['alignment-field'];
   const side = (s) => {
     const o = {};
     if (s['qr-parse']) o['qr-parse'] = s['qr-parse'];
