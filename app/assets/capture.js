@@ -175,13 +175,7 @@ function attachCropRotate(sourceCanvas, host, opts = {}) {
     }
     box.appendChild(guide);
   });
-  // Overlay mask: dark outside the crop, transparent inside. Placed between the
-  // image and the crop box so it stays inside .idc-stage (doesn't bleed onto buttons).
-  const mask = document.createElement('div');
-  mask.className = 'idc-crop-mask';
-  // Remove the old box-shadow approach — the mask replaces it.
-  box.style.boxShadow = 'none';
-  stage.append(imgCanvas, mask, box);
+  stage.append(imgCanvas, box);
 
   const tools = document.createElement('div');
   tools.className = 'idc-croptools';
@@ -256,14 +250,6 @@ function attachCropRotate(sourceCanvas, host, opts = {}) {
     box.style.top = crop.y + 'px';
     box.style.width = crop.w + 'px';
     box.style.height = crop.h + 'px';
-    // Clip the mask so the crop area punches through (evenodd: outer rect filled,
-    // inner rect subtracts — dark outside the crop, transparent inside).
-    const W = imgCanvas.offsetWidth || imgCanvas.width;
-    const H = imgCanvas.offsetHeight || imgCanvas.height;
-    const x = crop.x, y = crop.y, w = crop.w, h = crop.h;
-    mask.style.clipPath =
-      `polygon(evenodd, 0px 0px, ${W}px 0px, ${W}px ${H}px, 0px ${H}px,` +
-      ` ${x}px ${y}px, ${x}px ${y + h}px, ${x + w}px ${y + h}px, ${x + w}px ${y}px)`;
   }
 
   // Pointer drag: move the box, resize from an edge (single dimension), or
