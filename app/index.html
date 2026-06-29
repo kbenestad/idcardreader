@@ -55,8 +55,7 @@
 }
 .idc-drop.is-over { border-color: var(--accent); background: var(--surface-3); }
 .idc-drop .hint { color: var(--text-muted); font-size: var(--fs-small); }
-.idc-sides { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
-@media (max-width: 720px){ .idc-sides { grid-template-columns: 1fr; } }
+.idc-sides { display: flex; flex-direction: column; gap: 20px; }
 .idc-preview { max-width: 100%; border-radius: var(--radius-sm); border: 1px solid var(--border); }
 
 /* Cropper (capture.js) */
