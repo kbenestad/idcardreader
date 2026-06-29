@@ -525,16 +525,25 @@ function mountRegionEditor(host, side) {
       linkHost.innerHTML = '';
       const keys = (sideObj['qr-parse'] && sideObj['qr-parse'].keys) || [];
       if (!keys.length) return;
-      const textFields = sideObj.fields.filter(f => f.type === 'text');
-      if (!textFields.length) return;
+      // Collect text/date fields from BOTH sides so QR keys from one side can
+      // populate fields on the other side.
+      const allTextFields = [];
+      ['front', 'back'].forEach(s => {
+        if (!tpl[s]) return;
+        (tpl[s].fields || []).filter(f => f.type === 'text' || f.type === 'date').forEach(f => {
+          allTextFields.push({ f, fieldSide: s });
+        });
+      });
+      if (!allTextFields.length) return;
       linkHost.appendChild(el('div', { className: 'kb-label', style: { marginBottom: '6px' } }, S('qr-key-link')));
-      textFields.forEach(f => {
+      allTextFields.forEach(({ f, fieldSide }) => {
         const sel = el('select', { className: 'kb-select' });
         sel.appendChild(el('option', { value: '' }, S('qr-key-none')));
         keys.forEach(k => { const o = el('option', { value: k }, k); if (f['qr-key'] === k) o.selected = true; sel.appendChild(o); });
         sel.addEventListener('change', () => { if (sel.value) f['qr-key'] = sel.value; else delete f['qr-key']; });
         const row = el('div', { className: 'kb-field', style: { marginBottom: '8px' } });
-        row.append(el('span', { className: 'kb-label' }, f.label || f.id), sel);
+        const sideLabel = fieldSide !== side ? ' (' + S(fieldSide === 'front' ? 'front-word' : 'back-word') + ')' : '';
+        row.append(el('span', { className: 'kb-label' }, (f.label || f.id) + sideLabel), sel);
         linkHost.appendChild(row);
       });
     }
@@ -607,53 +616,58 @@ function buildExpiryCard() {
   return card;
 }
 
-function getAlignmentFields() {
-  // Support new array format and legacy single-object format.
-  return tpl['alignment-fields'] || (tpl['alignment-field'] ? [tpl['alignment-field'], null] : [null, null]);
+function getAlignmentFieldsForSide(side) {
+  const all = tpl['alignment-fields'] || (tpl['alignment-field'] ? [tpl['alignment-field']] : []);
+  return all.filter(af => af && af.side === side);
 }
-function setAlignmentField(idx, value) {
-  const afs = getAlignmentFields().slice(0, 2);
-  while (afs.length < 2) afs.push(null);
-  if (!value) afs[idx] = null;
-  else { const [side, id] = value.split(':'); afs[idx] = { side, id }; }
-  tpl['alignment-fields'] = afs;
+function setAlignmentFieldForSide(side, idx, id) {
+  const all = (tpl['alignment-fields'] || []).filter(af => af);
+  const others = all.filter(af => af.side !== side);
+  const mine = all.filter(af => af.side === side);
+  mine[idx] = id ? { side, id } : null;
+  const next = [...others, ...mine.filter(Boolean)];
+  if (next.length) tpl['alignment-fields'] = next;
+  else delete tpl['alignment-fields'];
   delete tpl['alignment-field'];
 }
-function populateAlignmentOptions(sel, idx) {
-  const afs = getAlignmentFields();
-  const af = afs[idx] || null;
-  let afStillValid = false;
+function populateAlignmentOptionsForSide(sel, side, idx) {
+  const guides = getAlignmentFieldsForSide(side);
+  const af = guides[idx] || null;
+  let valid = false;
   sel.innerHTML = '';
   sel.appendChild(el('option', { value: '' }, S('alignment-none')));
-  ['front', 'back'].forEach(side => {
-    if (!tpl[side]) return;
-    (tpl[side].fields || []).filter(f => f.id).forEach(f => {
-      const val = side + ':' + f.id;
-      const o = el('option', { value: val }, (side === 'front' ? S('front-word') : S('back-word')) + ' · ' + (f.label || f.id));
-      if (af && af.side === side && af.id === f.id) { o.selected = true; afStillValid = true; }
-      sel.appendChild(o);
-    });
+  (tpl[side] && tpl[side].fields || []).filter(f => f.id).forEach(f => {
+    const o = el('option', { value: f.id }, f.label || f.id);
+    if (af && af.id === f.id) { o.selected = true; valid = true; }
+    sel.appendChild(o);
   });
-  if (af && !afStillValid) setAlignmentField(idx, '');
+  if (af && !valid) setAlignmentFieldForSide(side, idx, null);
 }
 function syncAlignment() {
-  [0, 1].forEach(idx => {
-    const sel = document.getElementById('idc-alignment-sel-' + idx);
-    if (sel) populateAlignmentOptions(sel, idx);
+  ['front', 'back'].forEach(side => {
+    [0, 1].forEach(idx => {
+      const sel = document.getElementById('idc-alignment-sel-' + side + '-' + idx);
+      if (sel) populateAlignmentOptionsForSide(sel, side, idx);
+    });
   });
 }
 function buildAlignmentCard() {
   const card = el('div', { className: 'kb-card' });
   card.appendChild(el('div', { className: 'kb-card__title' }, S('alignment-title')));
   card.appendChild(el('p', { className: 'idc-muted', style: { marginBottom: '10px' } }, S('alignment-hint')));
-  const grid = el('div', { className: 'kb-grid cols-2' });
-  [0, 1].forEach(idx => {
-    const sel = el('select', { className: 'kb-select', id: 'idc-alignment-sel-' + idx });
-    populateAlignmentOptions(sel, idx);
-    sel.addEventListener('change', () => setAlignmentField(idx, sel.value));
-    grid.appendChild(field(S(idx === 0 ? 'alignment-guide-1' : 'alignment-guide-2'), sel));
+  ['front', 'back'].forEach(side => {
+    if (side === 'back' && !tpl.back) return;
+    card.appendChild(el('div', { className: 'kb-label', style: { marginTop: '10px', marginBottom: '6px' } },
+      S(side === 'front' ? 'front-word' : 'back-word')));
+    const grid = el('div', { className: 'kb-grid cols-2' });
+    [0, 1].forEach(idx => {
+      const sel = el('select', { className: 'kb-select', id: 'idc-alignment-sel-' + side + '-' + idx });
+      populateAlignmentOptionsForSide(sel, side, idx);
+      sel.addEventListener('change', () => setAlignmentFieldForSide(side, idx, sel.value || null));
+      grid.appendChild(field(S(idx === 0 ? 'alignment-guide-1' : 'alignment-guide-2'), sel));
+    });
+    card.appendChild(grid);
   });
-  card.appendChild(grid);
   return card;
 }
 
@@ -697,7 +711,7 @@ function buildTemplateObject() {
   // Emit a clean object in a stable key order.
   const clean = { name: tpl.name || tpl.slug, slug: tpl.slug, aspect: tpl.aspect || 'id-card' };
   if (tpl['expiry-field']) clean['expiry-field'] = tpl['expiry-field'];
-  const afs = getAlignmentFields().filter(Boolean);
+  const afs = (tpl['alignment-fields'] || []).filter(Boolean);
   if (afs.length) clean['alignment-fields'] = afs;
   if (tpl['ocr-language']) clean['ocr-language'] = tpl['ocr-language'];
   const side = (s) => {

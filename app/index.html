@@ -351,18 +351,28 @@ async function runExtraction() {
   busy = true; render();
   const ocrLang = tpl['ocr-language'] || CFG['ocr-language'] || 'eng';
   const out = [];
+
+  // Pass 1: decode every QR field across ALL sides and merge into one payload.
+  // A QR on the back can supply keys for fields on the front, and vice versa.
+  let mergedPayload = null;
   for (const side of ['front', 'back']) {
     if (!tpl[side] || !sideCanvas[side]) continue;
     const sideObj = tpl[side];
-    // 1) decode QR fields first → build the side's parsed payload.
-    let payload = null;
     for (const f of sideObj.fields.filter(f => f.type === 'qr')) {
       const crop = cropRegion(sideCanvas[side], f.region);
       const raw = decodeQr(crop);
       rawQr[side] = raw;
-      if (raw && sideObj['qr-parse']) payload = parseQrPayload(raw, sideObj['qr-parse']);
+      if (raw && sideObj['qr-parse']) {
+        const parsed = parseQrPayload(raw, sideObj['qr-parse']);
+        if (parsed) mergedPayload = Object.assign(mergedPayload || {}, parsed);
+      }
     }
-    // 2) all fields.
+  }
+
+  // Pass 2: extract all fields using the merged cross-side payload.
+  for (const side of ['front', 'back']) {
+    if (!tpl[side] || !sideCanvas[side]) continue;
+    const sideObj = tpl[side];
     for (const f of sideObj.fields) {
       const crop = cropRegion(sideCanvas[side], f.region);
       const r = {
@@ -379,18 +389,17 @@ async function runExtraction() {
       } else {
         r.ocrValue = await ocrField(crop, ocrLang);
         if (f.type === 'date' && r.ocrValue) {
-          // Keep raw OCR text for display; store the interpreted ISO date as value.
           r.dateText = r.ocrValue;
           r.value = normaliseDate(r.ocrValue, r.calendar) || r.ocrValue;
         } else {
           r.value = r.ocrValue;
         }
-        if (f['qr-key'] && payload && payload[f['qr-key']] != null) {
-          r.qrValue = payload[f['qr-key']];
+        if (f['qr-key'] && mergedPayload && mergedPayload[f['qr-key']] != null) {
+          r.qrValue = mergedPayload[f['qr-key']];
           if (r.qrValue && conflictBetween(r.ocrValue, r.qrValue, r.type, r.calendar)) {
             r.conflict = true; r.resolved = false; r.reviewed = false; r.value = '';
           } else if (r.qrValue && !r.ocrValue) {
-            r.value = r.qrValue;   // OCR empty, QR present → trust QR
+            r.value = r.qrValue;
           }
         }
       }
