@@ -176,7 +176,12 @@ function buildToolbar() {
 function buildHeader() {
   const header = el('header', { className: 'kb-header' });
   const brand = el('div', { className: 'kb-brand' });
-  const tile = el('span', { className: 'logo' }); tile.innerHTML = KB_BRAND_SVG;
+  const tile = el('span', { className: 'logo' });
+  if (CFG.logo === 'yes' || CFG.logo === true) {
+    const img = el('img', { src: 'assets/logo.png', alt: CFG.organization || '' });
+    img.onerror = () => { img.src = 'assets/logo.jpg'; img.onerror = () => { tile.innerHTML = KB_BRAND_SVG; }; };
+    tile.appendChild(img);
+  } else { tile.innerHTML = KB_BRAND_SVG; }
   const org = el('span', { className: 'org' });
   org.appendChild(document.createTextNode(CFG.organization || 'kbenestad/idcardreader'));
   const small = el('small'); small.textContent = CFG.tagline || S('subtitle');
