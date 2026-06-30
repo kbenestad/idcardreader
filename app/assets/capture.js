@@ -122,8 +122,9 @@ function aspectRatioFor(key) { return IDC_ASPECTS[key] || null; }
 
 /* ── 3.2  Crop / rotate UI ─────────────────────────────────────────────────── */
 /* Hand-rolled (no Cropper.js dependency — simple enough not to justify one).
- * Renders the working image into `host` with rotate buttons (90° steps) and a
- * draggable/resizable crop rectangle. The "Use this image" button is built by
+ * Renders the working image into `host` with rotate buttons (90° steps plus
+ * fine 1° nudges to straighten a tilted card) and a draggable/resizable crop
+ * rectangle. The "Use this image" button is built by
  * the CALLER, which calls getResult() to obtain the cropped+rotated canvas.
  *
  * opts:
@@ -142,7 +143,7 @@ function attachCropRotate(sourceCanvas, host, opts = {}) {
   const allowOverflow = !!opts.allowOverflow;
   // Accept array (alignmentRegions) or legacy single object (alignmentRegion), max 2.
   const alignmentRegions = (opts.alignmentRegions || (opts.alignmentRegion ? [opts.alignmentRegion] : [])).filter(Boolean).slice(0, 2);
-  let rotation = 0;                 // degrees, multiples of 90
+  let rotation = 0;                 // degrees (90° steps + fine 1° nudges)
   // crop rectangle in *display* pixels, relative to the shown image
   let crop = null;
 
@@ -191,25 +192,48 @@ function attachCropRotate(sourceCanvas, host, opts = {}) {
   const btnR = document.createElement('button');
   btnR.type = 'button'; btnR.className = 'kb-btn kb-btn--ghost kb-btn--sm'; btnR.title = 'Rotate right';
   btnR.textContent = '⟳ 90°';
+  // Fine rotation: nudge by 1° to straighten a slightly-tilted card.
+  const btnL1 = document.createElement('button');
+  btnL1.type = 'button'; btnL1.className = 'kb-btn kb-btn--ghost kb-btn--sm'; btnL1.title = 'Rotate left 1°';
+  btnL1.textContent = '⟲ 1°';
+  const btnR1 = document.createElement('button');
+  btnR1.type = 'button'; btnR1.className = 'kb-btn kb-btn--ghost kb-btn--sm'; btnR1.title = 'Rotate right 1°';
+  btnR1.textContent = '⟳ 1°';
+  const angleOut = document.createElement('span');
+  angleOut.className = 'idc-croptools__angle';
   const btnReset = document.createElement('button');
   btnReset.type = 'button'; btnReset.className = 'kb-btn kb-btn--ghost kb-btn--sm'; btnReset.title = 'Reset crop';
   btnReset.textContent = '⤢';
-  tools.append(btnL, btnR, btnReset);
+  tools.append(btnL, btnR, btnL1, btnR1, angleOut, btnReset);
+
+  // Show the current rotation normalised to (-180°, 180°].
+  function updateAngle() {
+    let r = ((rotation % 360) + 360) % 360;
+    if (r > 180) r -= 360;
+    angleOut.textContent = (r > 0 ? '+' : '') + r + '°';
+  }
 
   host.append(tools, stage);
 
-  // Rotated source → an off-screen canvas at the current rotation.
+  // Rotated source → an off-screen canvas at the current rotation. Handles
+  // arbitrary angles (90° steps + fine 1° nudges): the canvas grows to the
+  // rotated bounding box, so nothing is clipped. The corner triangles left bare
+  // by a non-orthogonal rotation are filled white (matching getResult's fill).
   function rotatedSource() {
     const r = ((rotation % 360) + 360) % 360;
     if (r === 0) return sourceCanvas;
-    const swap = r === 90 || r === 270;
-    const w = swap ? sourceCanvas.height : sourceCanvas.width;
-    const h = swap ? sourceCanvas.width : sourceCanvas.height;
+    const rad = r * Math.PI / 180;
+    const sw = sourceCanvas.width, sh = sourceCanvas.height;
+    const cos = Math.abs(Math.cos(rad)), sin = Math.abs(Math.sin(rad));
+    const w = Math.round(sw * cos + sh * sin);
+    const h = Math.round(sw * sin + sh * cos);
     const c = newCanvas(w, h);
     const ctx = c.getContext('2d');
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, w, h);
     ctx.translate(w / 2, h / 2);
-    ctx.rotate(r * Math.PI / 180);
-    ctx.drawImage(sourceCanvas, -sourceCanvas.width / 2, -sourceCanvas.height / 2);
+    ctx.rotate(rad);
+    ctx.drawImage(sourceCanvas, -sw / 2, -sh / 2);
     return c;
   }
 
@@ -234,6 +258,7 @@ function attachCropRotate(sourceCanvas, host, opts = {}) {
     if (!crop) initCrop();
     clampCrop();
     drawBox();
+    updateAngle();
   }
   function clampCrop() {
     const W = imgCanvas.width, H = imgCanvas.height;
@@ -331,6 +356,9 @@ function attachCropRotate(sourceCanvas, host, opts = {}) {
 
   btnL.addEventListener('click', () => { rotation -= 90; crop = null; paint(); });
   btnR.addEventListener('click', () => { rotation += 90; crop = null; paint(); });
+  // Fine nudges keep the crop so straightening doesn't reset the framing.
+  btnL1.addEventListener('click', () => { rotation -= 1; paint(); });
+  btnR1.addEventListener('click', () => { rotation += 1; paint(); });
   btnReset.addEventListener('click', () => { crop = null; paint(); });
   const onResize = () => paint();
   window.addEventListener('resize', onResize);

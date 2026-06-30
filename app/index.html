@@ -59,7 +59,8 @@
 .idc-preview { max-width: 100%; border-radius: var(--radius-sm); border: 1px solid var(--border); }
 
 /* Cropper (capture.js) */
-.idc-croptools { display: flex; gap: 8px; margin-bottom: 10px; }
+.idc-croptools { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 10px; }
+.idc-croptools__angle { font-size: var(--fs-sm); color: var(--text-muted); font-variant-numeric: tabular-nums; min-width: 3.5ch; text-align: center; }
 .idc-stage { position: relative; display: inline-block; max-width: 100%; line-height: 0;
   background: var(--surface-3); border-radius: var(--radius-sm); touch-action: none; }
 .idc-stage__img { display: block; max-width: 100%; cursor: crosshair; }
