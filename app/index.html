@@ -5,10 +5,9 @@
 
   One of two entry points sharing the basis chrome and assets/. This page reads
   a template (templates/*.yaml), captures a card, extracts each field via OCR /
-  QR / crop, lets a human review/resolve it, then downloads two records:
-    • a PDF  — frozen "valid/expired as of <gen date>" banner
-    • an HTML — re-checks expiry on every open AND wraps every value in a
-      one-click COPY button for fast copy-out into a case file.
+  QR / crop, lets a human review/resolve it, then downloads an HTML record that
+  re-checks expiry on every open AND wraps every value in a one-click COPY
+  button for fast copy-out into a case file.
 
   Chrome is the unchanged basis shell; capture/extraction live in capture.js.
   ════════════════════════════════════════════════════════════════════════════
@@ -28,8 +27,7 @@
   (function(){var t=localStorage.getItem('kb-theme');if(t)document.documentElement.setAttribute('data-theme',t);})();
 </script>
 
-<!-- CDN libraries: pdf-lib + js-yaml (existing) and the extraction stack. -->
-<script src="https://unpkg.com/pdf-lib@1.17.1/dist/pdf-lib.min.js"></script>
+<!-- CDN libraries: js-yaml (existing) and the extraction stack. -->
 <script src="https://unpkg.com/js-yaml@4.1.0/dist/js-yaml.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/tesseract.js@7.0.0/dist/tesseract.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js"></script>
@@ -454,10 +452,9 @@ function buildReviewCard() {
   actions.appendChild(reviewBtn);
   if (reviewDone) actions.appendChild(el('span', { className: 'idc-muted' }, S('review-done-state')));
 
-  const pdfBtn = el('button', { className: 'kb-btn kb-btn--primary', onClick: () => generatePdf() }, S('btn-download-pdf'));
   const htmlBtn = el('button', { className: 'kb-btn kb-btn--primary', onClick: () => generateHtml() }, S('btn-download-html'));
-  pdfBtn.disabled = htmlBtn.disabled = !(reviewDone && unresolved === 0);
-  actions.append(el('div', { className: 'spacer' }), htmlBtn, pdfBtn);
+  htmlBtn.disabled = !(reviewDone && unresolved === 0);
+  actions.append(el('div', { className: 'spacer' }), htmlBtn);
   gate.appendChild(actions);
 
   gate.appendChild(el('div', { className: 'kb-actbar', style: { marginTop: '10px' } },
@@ -557,74 +554,6 @@ function outputFilename(ext) {
   const today = new Date().toISOString().slice(0, 10);
   const namePart = bestName().replace(/[^\p{L}\p{N}]+/gu, '-').replace(/(^-|-$)/g, '').slice(0, 40) || tpl.slug;
   return `${tpl.slug}-${namePart}-${today}.${ext}`;
-}
-
-/* ── PDF output (pdf-lib) — frozen banner ────────────────────────────────── */
-async function generatePdf() {
-  const { PDFDocument, StandardFonts, rgb } = PDFLib;
-  const doc = await PDFDocument.create();
-  const font = await doc.embedFont(StandardFonts.Helvetica);
-  const bold = await doc.embedFont(StandardFonts.HelveticaBold);
-  const A4 = [595.28, 841.89], LETTER = [612, 792];
-  const size = (CFG['page-size'] || 'A4').toLowerCase() === 'letter' ? LETTER : A4;
-  let page = doc.addPage(size);
-  const M = 48; let y = size[1] - M;
-  const safe = s => String(s == null ? '' : s).replace(/[^\x20-\x7E\xA0-\xFF]/g, c => c === '\n' ? '\n' : '?');
-  const line = (text, opts = {}) => {
-    const f = opts.bold ? bold : font, sz = opts.size || 10;
-    if (y < M + 40) { page = doc.addPage(size); y = size[1] - M; }
-    page.drawText(safe(text), { x: opts.x || M, y, size: sz, font: f, color: opts.color || rgb(0.08, 0.1, 0.12) });
-    y -= (opts.lead || sz + 6);
-  };
-
-  line(S('output-title'), { bold: true, size: 16 });
-  line(tpl.name || tpl.slug, { size: 11, color: rgb(0.37, 0.41, 0.46) });
-  const genDate = new Date().toISOString().slice(0, 10);
-  line(S('generated-on') + ': ' + genDate, { size: 9, color: rgb(0.37, 0.41, 0.46), lead: 18 });
-
-  // Frozen expiry banner
-  const exp = expiryInfo();
-  let bannerText, bannerCol;
-  if (!exp.hasField) { bannerText = S('no-expiry-field'); bannerCol = rgb(0.37, 0.41, 0.46); }
-  else if (!exp.recognised) { bannerText = S('expiry-unknown'); bannerCol = rgb(0.79, 0.52, 0.12); }
-  else if (exp.expired) { bannerText = S('expired-banner') + ' — ' + S('expired-asof', { date: exp.iso }); bannerCol = rgb(0.84, 0.27, 0.27); }
-  else { bannerText = S('valid-banner') + ' — ' + S('valid-asof', { date: genDate }); bannerCol = rgb(0.12, 0.62, 0.37); }
-  page.drawRectangle({ x: M, y: y - 6, width: size[0] - 2 * M, height: 26, color: bannerCol });
-  page.drawText(safe(bannerText), { x: M + 10, y: y + 2, size: 11, font: bold, color: rgb(1, 1, 1) });
-  y -= 40;
-
-  // Side images
-  for (const side of ['front', 'back']) {
-    if (!sideCanvas[side]) continue;
-    try {
-      const jpg = await doc.embedJpg(dataUrlToBytes(sideCanvas[side].toDataURL('image/jpeg', 0.7)));
-      const maxW = (size[0] - 2 * M - 16) / 2;
-      const scale = Math.min(maxW / jpg.width, 120 / jpg.height);
-      const w = jpg.width * scale, h = jpg.height * scale;
-      if (y - h < M) { page = doc.addPage(size); y = size[1] - M; }
-      const x = side === 'front' ? M : M + maxW + 16;
-      page.drawImage(jpg, { x, y: y - h, width: w, height: h });
-      if (side === 'back' || !sideCanvas.back) y -= h + 16;
-    } catch (e) { /* skip unembeddable image */ }
-  }
-
-  // Field table
-  line('', { lead: 4 });
-  results.forEach(r => {
-    if (r.type === 'photo') return;
-    let val = r.value || '';
-    if (r.type === 'date') { const iso = normaliseDate(r.value, r.calendar); if (iso) val = iso + (val && iso !== val ? '  (' + val + ')' : ''); }
-    line(r.label + ':', { bold: true, size: 10, lead: 14 });
-    line('   ' + (val || S('field-empty')), { size: 11, lead: 18 });
-  });
-
-  // Raw QR audit
-  ['front', 'back'].forEach(side => {
-    if (rawQr[side]) { line(S('raw-qr-label') + ' (' + side + '):', { bold: true, size: 9, color: rgb(0.37, 0.41, 0.46), lead: 12 }); line('   ' + rawQr[side], { size: 8, color: rgb(0.37, 0.41, 0.46), lead: 14 }); }
-  });
-
-  const bytes = await doc.save();
-  downloadBlob(bytes, outputFilename('pdf'), 'application/pdf');
 }
 
 /* ── HTML output — standalone record, live expiry re-check, COPY buttons ─── */
@@ -820,12 +749,6 @@ function openLightbox(src, caption) {
   ov.addEventListener('click', close);
   document.addEventListener('keydown', onKey);
   document.body.appendChild(ov);
-}
-function dataUrlToBytes(dataUrl) {
-  const b64 = dataUrl.split(',')[1]; const bin = atob(b64);
-  const bytes = new Uint8Array(bin.length);
-  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
-  return bytes;
 }
 function downloadBlob(content, filename, type) {
   const url = URL.createObjectURL(new Blob([content], { type }));
