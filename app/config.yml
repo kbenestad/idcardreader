@@ -53,7 +53,7 @@ localisation:
       start-over: "Start over"
 
       # ── Extractor (index.html) ──
-      app-title-extract: "ID Reader"
+      app-title-extract: "ID Card Reader"
       doc-type-label: "Document type"
       doc-type-placeholder: "Select a document type…"
       no-templates: "No templates found. Build one with the template builder first."
