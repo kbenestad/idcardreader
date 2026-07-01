@@ -49,12 +49,10 @@ sync.sh, README.md
    Where an OCR value and a QR-derived value **disagree**, both are shown with
    neither pre-selected — you must pick one (or type a third) to resolve it.
 5. **Generate** (enabled after you confirm the review, and only with no
-   unresolved conflicts):
-   - **PDF** — a frozen "VALID / EXPIRED as of <generation date>" banner, the
-     card images, a field table, and the raw QR payload for audit.
-   - **HTML** — a standalone record that **re-checks the expiry against today's
-     date every time it is opened**, and wraps **every value in a one-click
-     Copy button** for fast copy-out into a case file.
+   unresolved conflicts) an **HTML** record — a standalone file that
+   **re-checks the expiry against today's date every time it is opened**, and
+   wraps **every value in a one-click Copy button** for fast copy-out into a
+   case file.
 
 ## Templates (`template.html` → `templates/*.yaml`)
 

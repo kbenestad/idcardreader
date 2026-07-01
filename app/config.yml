@@ -9,20 +9,8 @@
 # Organization
 organization:                # leave blank to show the kBenestad wordmark
 logo: no                     # yes|no — if yes, loads assets/logo.png or logo.jpg
-logo-maxwidth: 4             # cm — maximum logo width on the PDF
+logo-maxwidth: 4             # cm — maximum logo width in the header
 tagline:                     # subtitle shown below the org name (falls back to ui.subtitle)
-
-# Page setup
-page-size: A4                # A4 or letter
-
-# PDF output language: "default" (first defined language) or "user-selected" (follow the UI)
-output-language: default
-
-# Typography (PDF). Standard fonts: Helvetica, Times, Courier (+ Bold/Italic).
-font-body: Helvetica
-font-heading: Helvetica
-font-monospace: Courier
-font-size: 10
 
 # Branding — overrides the --accent token for this app
 accent-colour: "#2f6fed"
@@ -49,9 +37,9 @@ localisation:
         QR) from photos or scans of ID documents, using per-document **templates**.
 
         - **This page** (index) is the extractor for daily use: pick a document
-          type, capture the card, review the fields, and download a **PDF** and a
-          standalone **HTML** record. The HTML wraps every value in a one-click
-          **copy** button and re-checks the expiry date each time it is opened.
+          type, capture the card, review the fields, and download a standalone
+          **HTML** record. The HTML wraps every value in a one-click **copy**
+          button and re-checks the expiry date each time it is opened.
         - **template.html** is the setup-time builder: calibrate where each field
           sits on a card once, then export a template file.
 
@@ -97,7 +85,6 @@ localisation:
       gate-note: "Resolve every QR/OCR conflict, then confirm the review to enable output."
       btn-review-done: "Final review done"
       review-done-state: "Review confirmed — you can generate the record."
-      btn-download-pdf: "Download PDF"
       btn-download-html: "Download HTML"
       output-title: "ID document record"
       generated-on: "Generated"
