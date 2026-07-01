@@ -1,0 +1,106 @@
+# =============================================================================
+# Passport (MRZ) — extraction template
+# =============================================================================
+# Standard TD3 passport template. Unlike the ID-card templates, this one does
+# NOT optically OCR the visible bio-data page — that layout varies far too
+# much between issuing countries to template generically. Instead it OCRs only
+# the machine-readable zone (the two lines of OCR-B text at the bottom of the
+# data page) and parses it per ICAO Doc 9303, which is a FIXED format
+# (TD3: 2 lines × 44 characters) identical for every ICAO-compliant passport.
+# Every field below except "photo" and "mrz" itself comes from that one parse
+# — they don't have their own region, they just link into the MRZ payload via
+# `mrz-key`, so the same MRZ region is repeated as their `region` purely so the
+# review screen has something to show next to the value.
+#
+# `region` coordinates are PERCENTAGES of the working image (resolution-
+# independent). The MRZ region below is a CALIBRATION PLACEHOLDER positioned
+# per the ICAO 9303 TD3 physical layout (125 × 88 mm page, MRZ in the bottom
+# ~12%) — re-check it against a real passport photo/scan before trusting it.
+# The photo region is cosmetic only (not used in parsing) so it's less
+# critical to get exact.
+#
+# This template intentionally has no `back` side and no `expiry-field`
+# override beyond the MRZ-derived one — a passport's data page is one side.
+
+name: "Passport (MRZ)"
+slug: passport-mrz
+aspect: passport                          # ID-3 passport data page, 125 × 88 mm
+expiry-field: { side: front, id: expiry }
+
+front:
+  fields:
+    - id: photo
+      label: "Photo"
+      type: photo
+      region: { x: 4.0, y: 10.0, w: 26.0, h: 55.0 }
+
+    - id: mrz
+      label: "Machine Readable Zone"
+      type: mrz
+      region: { x: 2.8, y: 86.0, w: 94.4, h: 12.0 }
+
+    - id: doc-type
+      label: "Document Type"
+      type: text
+      mrz-key: docType
+      region: { x: 2.8, y: 86.0, w: 94.4, h: 12.0 }
+
+    - id: issuing-country
+      label: "Issuing Country"
+      type: text
+      mrz-key: issuingCountry
+      region: { x: 2.8, y: 86.0, w: 94.4, h: 12.0 }
+
+    - id: surname
+      label: "Surname"
+      type: text
+      mrz-key: surname
+      region: { x: 2.8, y: 86.0, w: 94.4, h: 12.0 }
+
+    - id: given-names
+      label: "Given Names"
+      type: text
+      mrz-key: givenNames
+      region: { x: 2.8, y: 86.0, w: 94.4, h: 12.0 }
+
+    - id: passport-number
+      label: "Passport Number"
+      type: text
+      mrz-key: passportNumber
+      region: { x: 2.8, y: 86.0, w: 94.4, h: 12.0 }
+
+    - id: nationality
+      label: "Nationality"
+      type: text
+      mrz-key: nationality
+      region: { x: 2.8, y: 86.0, w: 94.4, h: 12.0 }
+
+    - id: sex
+      label: "Sex"
+      type: text
+      mrz-key: sex
+      region: { x: 2.8, y: 86.0, w: 94.4, h: 12.0 }
+
+    - id: dob
+      label: "Date of Birth"
+      type: date
+      mrz-key: dob
+      region: { x: 2.8, y: 86.0, w: 94.4, h: 12.0 }
+
+    - id: expiry
+      label: "Expiry Date"
+      type: date
+      mrz-key: expiry
+      region: { x: 2.8, y: 86.0, w: 94.4, h: 12.0 }
+
+    - id: optional-data
+      label: "Optional Data"
+      type: text
+      mrz-key: optionalData
+      region: { x: 2.8, y: 86.0, w: 94.4, h: 12.0 }
+
+    - id: mrz-check
+      label: "MRZ Check Digit"
+      type: text
+      mrz-key: compositeValid
+      region: { x: 2.8, y: 86.0, w: 94.4, h: 12.0 }

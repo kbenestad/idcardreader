@@ -24,6 +24,10 @@
  *   decodeQr(regionCanvas)            → string | null
  *   parseQrPayload(raw, qrParseCfg)   → { [key]: string } | null
  *   normaliseDate(raw, calendar)      → 'YYYY-MM-DD' | null
+ *   ocrMrz(regionCanvas)              → Promise<string>
+ *   parseMrzTd3(rawOcrText)           → { docType, issuingCountry, surname, givenNames,
+ *                                         passportNumber, nationality, sex, dob, expiry,
+ *                                         optionalData, *Valid (bool|null), raw } | null
  *   canvasToDataURL(canvas, type, q)  → data: URI
  * ========================================================================== */
 "use strict";
@@ -449,6 +453,23 @@ async function ocrField(regionCanvas, lang = 'eng') {
   }
 }
 
+/* OCR one region as an MRZ (machine-readable zone) strip. Same engine as
+ * ocrField, but constrained to the MRZ character set (A-Z, 0-9, filler '<')
+ * since that whitelist meaningfully improves accuracy on the OCR-B font MRZs
+ * are printed in. Never throws — returns '' on failure. */
+async function ocrMrz(regionCanvas) {
+  try {
+    if (typeof Tesseract === 'undefined') throw new Error('Tesseract.js not loaded');
+    const { data } = await Tesseract.recognize(regionCanvas, 'eng', {
+      tessedit_char_whitelist: 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789<',
+    });
+    return (data && data.text ? data.text : '').trim();
+  } catch (e) {
+    console.warn('ocrMrz failed:', e);
+    return '';
+  }
+}
+
 /* Decode a QR code from a region. Returns the raw string, or null if none. */
 function decodeQr(regionCanvas) {
   try {
@@ -528,4 +549,96 @@ function normaliseDate(rawString, calendar = 'gregorian') {
   if (m) { let y = +m[3]; if (y < 100) y += 2000; return valid(adjust(y), +m[2], +m[1]); }
 
   return null;
+}
+
+/* ── 3.6  MRZ (machine-readable zone) parsing ─────────────────────────────────
+ * ICAO Doc 9303 fixes the passport (TD3) MRZ as two 44-character lines with a
+ * deterministic layout and check-digit algorithm — identical for every issuing
+ * country, unlike the visible bio-data page (which varies too much to template
+ * generically). This is intentionally TD3-only (passports); ID cards use the
+ * 3-line TD1 layout, which is not implemented here. */
+function _mrzCharValue(c) {
+  if (c >= '0' && c <= '9') return c.charCodeAt(0) - 48;
+  if (c >= 'A' && c <= 'Z') return c.charCodeAt(0) - 55;   // A=10 .. Z=35
+  return 0;                                                // '<' and anything else
+}
+function _mrzCheckDigit(s) {
+  const weights = [7, 3, 1];
+  let sum = 0;
+  for (let i = 0; i < s.length; i++) sum += _mrzCharValue(s[i]) * weights[i % 3];
+  return sum % 10;
+}
+// Returns null (not applicable) when the check-digit slot is blank ('<' — an
+// unused optional field), true/false otherwise.
+function _mrzCheck(field, digit) {
+  if (!digit || digit === '<') return null;
+  return String(_mrzCheckDigit(field)) === digit;
+}
+// MRZ dates are 2-digit years with no century. Birth dates are always in the
+// past, so a year "after" the current 2-digit year must mean the 1900s.
+// Expiry dates are assumed 21st-century, since no TD3-format passport
+// predates 2000. Returns 'YYYY-MM-DD', or null if unparseable.
+function _mrzDate(yyMMdd, mode) {
+  if (!/^\d{6}$/.test(yyMMdd)) return null;
+  const yy = +yyMMdd.slice(0, 2), mm = +yyMMdd.slice(2, 4), dd = +yyMMdd.slice(4, 6);
+  if (mm < 1 || mm > 12 || dd < 1 || dd > 31) return null;
+  const nowYY = new Date().getUTCFullYear() % 100;
+  const century = mode === 'future' ? 2000 : (yy > nowYY ? 1900 : 2000);
+  const y = century + yy;
+  const dt = new Date(Date.UTC(y, mm - 1, dd));
+  if (dt.getUTCFullYear() !== y || dt.getUTCMonth() !== mm - 1 || dt.getUTCDate() !== dd) return null;
+  const pad = n => String(n).padStart(2, '0');
+  return `${y}-${pad(mm)}-${pad(dd)}`;
+}
+// Split a TD3 name field ("SURNAME<<GIVEN<NAMES<<<<...") on the first '<<'.
+function _mrzName(field) {
+  const idx = field.indexOf('<<');
+  const surnamePart = idx === -1 ? field : field.slice(0, idx);
+  const givenPart = idx === -1 ? '' : field.slice(idx + 2);
+  const clean = s => s.replace(/</g, ' ').trim().replace(/\s+/g, ' ');
+  return { surname: clean(surnamePart), givenNames: clean(givenPart) };
+}
+
+/* Parse OCR'd MRZ text as TD3 (passport, 2×44 chars). Strips anything that
+ * isn't A-Z/0-9/'<' and re-slices into two 44-char lines, so it tolerates
+ * whitespace/newline noise from OCR — but returns null outright if too little
+ * text was recognised to plausibly be a TD3 block. Never throws. */
+function parseMrzTd3(rawOcrText) {
+  const clean = String(rawOcrText || '').toUpperCase().replace(/[^A-Z0-9<]/g, '');
+  if (clean.length < 80) return null;
+  const l1 = clean.slice(0, 44).padEnd(44, '<');
+  const l2 = clean.slice(44, 88).padEnd(44, '<');
+
+  const docType = l1.slice(0, 2).replace(/</g, '').trim();
+  const issuingCountry = l1.slice(2, 5).replace(/</g, '');
+  const { surname, givenNames } = _mrzName(l1.slice(5, 44));
+
+  const passportNumberField = l2.slice(0, 9);
+  const passportNumberCheck = l2[9];
+  const nationality = l2.slice(10, 13).replace(/</g, '');
+  const dobField = l2.slice(13, 19);
+  const dobCheck = l2[19];
+  const sexRaw = l2[20];
+  const expiryField = l2.slice(21, 27);
+  const expiryCheck = l2[27];
+  const optionalField = l2.slice(28, 42);
+  const optionalCheck = l2[42];
+  const compositeField = l2.slice(0, 10) + l2.slice(13, 20) + l2.slice(21, 43);
+  const compositeCheck = l2[43];
+
+  return {
+    docType, issuingCountry, surname, givenNames,
+    passportNumber: passportNumberField.replace(/</g, ''),
+    nationality,
+    sex: sexRaw === 'M' ? 'M' : sexRaw === 'F' ? 'F' : '',
+    dob: _mrzDate(dobField, 'past'),
+    expiry: _mrzDate(expiryField, 'future'),
+    optionalData: optionalField.replace(/</g, '').trim(),
+    passportNumberValid: _mrzCheck(passportNumberField, passportNumberCheck),
+    dobValid: _mrzCheck(dobField, dobCheck),
+    expiryValid: _mrzCheck(expiryField, expiryCheck),
+    optionalValid: _mrzCheck(optionalField, optionalCheck),
+    compositeValid: _mrzCheck(compositeField, compositeCheck),
+    raw: l1 + '\n' + l2,
+  };
 }
