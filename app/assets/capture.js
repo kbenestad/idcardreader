@@ -192,24 +192,38 @@ function attachCropRotate(sourceCanvas, host, opts = {}) {
   const btnR = document.createElement('button');
   btnR.type = 'button'; btnR.className = 'kb-btn kb-btn--ghost kb-btn--sm'; btnR.title = 'Rotate right';
   btnR.textContent = '⟳ 90°';
-  // Fine rotation: nudge by 1° to straighten a slightly-tilted card.
+  // Fine rotation: nudge by 1°, 0.5° or 0.1° to straighten a slightly-tilted card.
   const btnL1 = document.createElement('button');
   btnL1.type = 'button'; btnL1.className = 'kb-btn kb-btn--ghost kb-btn--sm'; btnL1.title = 'Rotate left 1°';
   btnL1.textContent = '⟲ 1°';
   const btnR1 = document.createElement('button');
   btnR1.type = 'button'; btnR1.className = 'kb-btn kb-btn--ghost kb-btn--sm'; btnR1.title = 'Rotate right 1°';
   btnR1.textContent = '⟳ 1°';
+  const btnL05 = document.createElement('button');
+  btnL05.type = 'button'; btnL05.className = 'kb-btn kb-btn--ghost kb-btn--sm'; btnL05.title = 'Rotate left 0.5°';
+  btnL05.textContent = '⟲ 0.5°';
+  const btnR05 = document.createElement('button');
+  btnR05.type = 'button'; btnR05.className = 'kb-btn kb-btn--ghost kb-btn--sm'; btnR05.title = 'Rotate right 0.5°';
+  btnR05.textContent = '⟳ 0.5°';
+  const btnL01 = document.createElement('button');
+  btnL01.type = 'button'; btnL01.className = 'kb-btn kb-btn--ghost kb-btn--sm'; btnL01.title = 'Rotate left 0.1°';
+  btnL01.textContent = '⟲ 0.1°';
+  const btnR01 = document.createElement('button');
+  btnR01.type = 'button'; btnR01.className = 'kb-btn kb-btn--ghost kb-btn--sm'; btnR01.title = 'Rotate right 0.1°';
+  btnR01.textContent = '⟳ 0.1°';
   const angleOut = document.createElement('span');
   angleOut.className = 'idc-croptools__angle';
   const btnReset = document.createElement('button');
   btnReset.type = 'button'; btnReset.className = 'kb-btn kb-btn--ghost kb-btn--sm'; btnReset.title = 'Reset crop';
   btnReset.textContent = '⤢';
-  tools.append(btnL, btnR, btnL1, btnR1, angleOut, btnReset);
+  tools.append(btnL, btnR, btnL1, btnR1, btnL05, btnR05, btnL01, btnR01, angleOut, btnReset);
 
-  // Show the current rotation normalised to (-180°, 180°].
+  // Show the current rotation normalised to (-180°, 180°], to 1 decimal place
+  // (fine nudges accumulate float error, e.g. 0.1+0.1+0.1 !== 0.3 exactly).
   function updateAngle() {
     let r = ((rotation % 360) + 360) % 360;
     if (r > 180) r -= 360;
+    r = Math.round(r * 10) / 10;
     angleOut.textContent = (r > 0 ? '+' : '') + r + '°';
   }
 
@@ -356,9 +370,16 @@ function attachCropRotate(sourceCanvas, host, opts = {}) {
 
   btnL.addEventListener('click', () => { rotation -= 90; crop = null; paint(); });
   btnR.addEventListener('click', () => { rotation += 90; crop = null; paint(); });
-  // Fine nudges keep the crop so straightening doesn't reset the framing.
-  btnL1.addEventListener('click', () => { rotation -= 1; paint(); });
-  btnR1.addEventListener('click', () => { rotation += 1; paint(); });
+  // Fine nudges keep the crop so straightening doesn't reset the framing. Round
+  // to 1 decimal on every nudge so repeated 0.1°/0.5° clicks don't drift from
+  // float error (e.g. 0.1 + 0.2 !== 0.3 exactly).
+  const nudge = deg => { rotation = Math.round((rotation + deg) * 10) / 10; paint(); };
+  btnL1.addEventListener('click', () => nudge(-1));
+  btnR1.addEventListener('click', () => nudge(1));
+  btnL05.addEventListener('click', () => nudge(-0.5));
+  btnR05.addEventListener('click', () => nudge(0.5));
+  btnL01.addEventListener('click', () => nudge(-0.1));
+  btnR01.addEventListener('click', () => nudge(0.1));
   btnReset.addEventListener('click', () => { crop = null; paint(); });
   const onResize = () => paint();
   window.addEventListener('resize', onResize);
