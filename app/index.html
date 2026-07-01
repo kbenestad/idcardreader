@@ -216,10 +216,14 @@ let tpl = null;                                   // selected template
 const sideCanvas = { front: null, back: null };   // finalized working images
 let results = null;                                // array of field result objects
 const rawQr = { front: null, back: null };         // raw decoded QR per side
+const rawMrz = { front: null, back: null };        // raw OCR'd MRZ lines per side
 let validationAttempted = false;
 let busy = false;
 
-function resetExtraction() { results = null; validationAttempted = false; rawQr.front = rawQr.back = null; }
+function resetExtraction() {
+  results = null; validationAttempted = false;
+  rawQr.front = rawQr.back = null; rawMrz.front = rawMrz.back = null;
+}
 
 /* ── Render ──────────────────────────────────────────────────────────────── */
 function render() {
@@ -372,7 +376,25 @@ async function runExtraction() {
     }
   }
 
-  // Pass 2: extract all fields using the merged cross-side payload.
+  // Pass 1b: OCR + parse every MRZ field across ALL sides and merge into one
+  // payload, same shape as the QR pass above. MRZ-linked fields (below) trust
+  // this payload alone — they are never separately OCR'd, since a passport's
+  // visible bio-data layout varies far too much by issuing country to template
+  // generically, whereas the MRZ format itself (TD3) is fixed by ICAO 9303.
+  let mergedMrz = null;
+  for (const side of ['front', 'back']) {
+    if (!tpl[side] || !sideCanvas[side]) continue;
+    const sideObj = tpl[side];
+    for (const f of sideObj.fields.filter(f => f.type === 'mrz')) {
+      const crop = cropRegion(sideCanvas[side], f.region);
+      const raw = await ocrMrz(crop);
+      rawMrz[side] = raw;
+      const parsed = parseMrzTd3(raw);
+      if (parsed) mergedMrz = Object.assign(mergedMrz || {}, parsed);
+    }
+  }
+
+  // Pass 2: extract all fields using the merged cross-side payloads.
   for (const side of ['front', 'back']) {
     if (!tpl[side] || !sideCanvas[side]) continue;
     const sideObj = tpl[side];
@@ -389,6 +411,10 @@ async function runExtraction() {
         r.value = '';
       } else if (f.type === 'qr') {
         r.value = rawQr[side] || '';
+      } else if (f.type === 'mrz') {
+        r.value = rawMrz[side] || '';
+      } else if (f['mrz-key']) {
+        r.value = mrzFieldValue(mergedMrz, f['mrz-key']);
       } else {
         r.ocrValue = await ocrField(crop, ocrLang);
         if (f.type === 'date' && r.ocrValue) {
@@ -412,6 +438,15 @@ async function runExtraction() {
   results = out; busy = false; render();
   const review = document.getElementById('idc-review-card');
   if (review) review.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+// Look up an `mrz-key` in the merged MRZ payload. Check-digit results are
+// booleans in that payload (e.g. compositeValid) — render those as a plain
+// OK/MISMATCH string rather than "true"/"false".
+function mrzFieldValue(mergedMrz, key) {
+  if (!mergedMrz || mergedMrz[key] == null) return '';
+  const v = mergedMrz[key];
+  return typeof v === 'boolean' ? (v ? 'OK' : 'MISMATCH') : String(v);
 }
 
 function normForCompare(s) { return String(s || '').replace(/\s+/g, '').toLowerCase(); }
