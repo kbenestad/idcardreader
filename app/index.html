@@ -216,10 +216,10 @@ let tpl = null;                                   // selected template
 const sideCanvas = { front: null, back: null };   // finalized working images
 let results = null;                                // array of field result objects
 const rawQr = { front: null, back: null };         // raw decoded QR per side
-let reviewDone = false;
+let validationAttempted = false;
 let busy = false;
 
-function resetExtraction() { results = null; reviewDone = false; rawQr.front = rawQr.back = null; }
+function resetExtraction() { results = null; validationAttempted = false; rawQr.front = rawQr.back = null; }
 
 /* ── Render ──────────────────────────────────────────────────────────────── */
 function render() {
@@ -382,7 +382,7 @@ async function runExtraction() {
         id: f.id, label: f.label || f.id, type: f.type, side, calendar: f.calendar || 'gregorian',
         regionDataUrl: crop.toDataURL('image/jpeg', 0.8),
         ocrValue: '', qrValue: '', value: '', dateText: '',
-        conflict: false, resolved: true, reviewed: true, photoDataUrl: null,
+        conflict: false, resolved: true, reviewed: false, photoDataUrl: null,
       };
       if (f.type === 'photo') {
         r.photoDataUrl = crop.toDataURL('image/jpeg', 0.85);
@@ -400,7 +400,7 @@ async function runExtraction() {
         if (f['qr-key'] && mergedPayload && mergedPayload[f['qr-key']] != null) {
           r.qrValue = mergedPayload[f['qr-key']];
           if (r.qrValue && conflictBetween(r.ocrValue, r.qrValue, r.type, r.calendar)) {
-            r.conflict = true; r.resolved = false; r.reviewed = false; r.value = '';
+            r.conflict = true; r.resolved = false; r.value = '';
           } else if (r.qrValue && !r.ocrValue) {
             r.value = r.qrValue;
           }
@@ -440,6 +440,8 @@ function buildReviewCard() {
   });
 
   const unresolved = results.filter(r => r.conflict && !r.resolved).length;
+  const unreviewed = results.filter(r => !r.reviewed).length;
+  const ready = validationAttempted && unresolved === 0 && unreviewed === 0;
   const gate = el('div', { style: { marginTop: '16px' } });
   if (unresolved > 0) {
     const n = el('div', { className: 'kb-note kb-note--warning' });
@@ -447,15 +449,21 @@ function buildReviewCard() {
     gate.appendChild(n);
   }
   const actions = el('div', { className: 'kb-actions', style: { marginTop: '8px' } });
-  const reviewBtn = el('button', { className: 'kb-btn kb-btn--soft', onClick: () => { reviewDone = true; render(); document.getElementById('idc-review-card').scrollIntoView({ block: 'end' }); } }, S('btn-review-done'));
-  reviewBtn.disabled = unresolved > 0 || reviewDone;
-  actions.appendChild(reviewBtn);
-  if (reviewDone) actions.appendChild(el('span', { className: 'idc-muted' }, S('review-done-state')));
+  const validateBtn = el('button', { className: 'kb-btn kb-btn--soft', onClick: () => { validationAttempted = true; render(); document.getElementById('idc-review-card').scrollIntoView({ block: 'end' }); } }, S('btn-validate'));
+  validateBtn.disabled = unresolved > 0;
+  actions.appendChild(validateBtn);
 
   const htmlBtn = el('button', { className: 'kb-btn kb-btn--primary', onClick: () => generateHtml() }, S('btn-download-html'));
-  htmlBtn.disabled = !(reviewDone && unresolved === 0);
+  htmlBtn.disabled = !ready;
   actions.append(el('div', { className: 'spacer' }), htmlBtn);
   gate.appendChild(actions);
+
+  if (validationAttempted) {
+    const note = el('div', { className: 'kb-note ' + (ready ? 'kb-note--success' : 'kb-note--warning'), style: { marginTop: '10px' } });
+    note.innerHTML = '<span>' + (ready ? '✓' : '⚠') + '</span><div>'
+      + (ready ? S('validation-success') : S('validation-warning', { n: unreviewed })) + '</div>';
+    gate.appendChild(note);
+  }
 
   gate.appendChild(el('div', { className: 'kb-actbar', style: { marginTop: '10px' } },
     el('button', { className: 'kb-btn kb-btn--ghost kb-btn--sm', onClick: () => { resetExtraction(); render(); } }, S('start-over'))));
@@ -506,13 +514,12 @@ function reviewRow(r, i) {
   }
   row.appendChild(mid);
 
-  // col 3: reviewed toggle (informational; default true)
+  // col 3: reviewed toggle — defaults to unreviewed; must be confirmed (every
+  // field, incl. photos) before the Validate button will pass.
   const rev = el('span', { className: 'idc-review ' + (r.reviewed ? 'is-ok' : 'is-no') });
   rev.append(el('span', null, S('reviewed-label') + ':'), el('span', { className: 'mark' }, r.reviewed ? '✓' : '✗'));
-  if (r.type !== 'photo') {
-    rev.style.cursor = 'pointer';
-    rev.addEventListener('click', () => { if (r.conflict && !r.resolved) return; r.reviewed = !r.reviewed; render(); });
-  }
+  rev.style.cursor = 'pointer';
+  rev.addEventListener('click', () => { if (r.conflict && !r.resolved) return; r.reviewed = !r.reviewed; render(); });
   row.appendChild(rev);
   return row;
 }
